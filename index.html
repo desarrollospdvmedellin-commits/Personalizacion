@@ -126,6 +126,12 @@
 
   .section-title{font-size:13px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:var(--ink-soft);margin:26px 0 10px;}
 
+  .list-head{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:26px 0 10px;flex-wrap:wrap;}
+  .search-box{
+    border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;min-width:230px;background:#fff;color:var(--ink);
+  }
+  .search-box:focus{outline:2px solid var(--brand);outline-offset:1px;border-color:var(--brand);}
+
   .alert-list{display:flex;flex-direction:column;gap:8px;margin-bottom:8px;}
   .alert{
     display:flex;align-items:center;gap:10px;background:var(--red-soft);border:1px solid #f2cac6;
@@ -232,6 +238,23 @@
   .paint-mini.late{background:var(--red);color:#fff;}
   .paint-mini.wait{background:#eef0f3;color:var(--ink-soft);}
 
+  .est-badge{
+    display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:9px;
+    background:var(--blue-soft);border:1.5px solid var(--blue);border-radius:9px;
+    padding:9px 14px;
+  }
+  .est-badge.late{background:var(--red-soft);border-color:var(--red);animation:pulseRed 1.8s infinite;}
+  .est-badge.big{padding:14px 18px;margin:0 0 16px;border-width:2px;border-radius:var(--radius);}
+  .est-badge.big .est-icon{font-size:26px;}
+  .est-badge.big .est-date{font-size:24px;}
+  .est-badge.big .est-label,.est-badge.big .est-diff{font-size:13.5px;}
+  .est-icon{font-size:19px;}
+  .est-label{font-size:12.5px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;}
+  .est-date{font-family:'Space Grotesk',sans-serif;font-size:19px;font-weight:700;color:var(--blue);}
+  .est-badge.late .est-date{color:var(--red);}
+  .est-diff{font-size:12.5px;font-weight:600;color:var(--ink-soft);}
+  .est-badge.late .est-diff{color:var(--red);}
+
   .paint-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:24px;}
 
   /* ===== Informes ===== */
@@ -239,6 +262,11 @@
   .report-row{display:grid;grid-template-columns:170px 1fr 40px;align-items:center;gap:10px;font-size:12.5px;}
   .report-bar-bg{background:var(--line-soft);border-radius:5px;height:11px;overflow:hidden;}
   .report-bar-fill{height:100%;border-radius:5px;}
+
+  .informe-table{width:100%;border-collapse:collapse;margin-bottom:24px;font-size:13px;}
+  .informe-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);border-bottom:2px solid var(--line);padding:8px 10px;}
+  .informe-table td{padding:9px 10px;border-bottom:1px solid var(--line-soft);}
+  .informe-table tr:hover td{background:var(--bg);}
   .paint-card{
     background:var(--blue-soft);border:1px solid #c3d6ea;border-radius:var(--radius);padding:12px 14px;cursor:pointer;
     transition:transform .12s ease;
@@ -447,7 +475,10 @@
 
       <div id="paint-watchlist"></div>
 
-      <div class="section-title">Motos en seguimiento</div>
+      <div class="list-head">
+        <div class="section-title" style="margin:0;">Motos en seguimiento</div>
+        <input type="text" id="dash-search" class="search-box" placeholder="Buscar por moto, asesor, cliente...">
+      </div>
       <div class="moto-grid" id="dash-moto-list"></div>
       <div id="dash-completed-block"></div>
     </div>
@@ -480,6 +511,7 @@
           </div>
 
           <div class="field"><label># Motor</label><input type="text" id="f-motor" placeholder="Número de motor"></div>
+          <div class="field"><label>N° de piezas a desmontar</label><input type="number" id="f-num-piezas" min="0" placeholder="Ej: 4"></div>
 
           <div class="field">
             <label>Color de fábrica</label>
@@ -550,8 +582,9 @@
       <div class="page-head">
         <div>
           <h2>Seguimiento por moto</h2>
-          <p class="sub">Selecciona una moto para ver y marcar su checklist de etapas</p>
+          <p class="sub">Selecciona una moto para ver y marcar su checklist de etapas. Las más urgentes aparecen primero.</p>
         </div>
+        <input type="text" id="seg-search" class="search-box" placeholder="Buscar por moto, asesor, cliente...">
       </div>
       <div class="moto-grid" id="seg-moto-list"></div>
       <div id="seg-completed-block"></div>
@@ -601,14 +634,29 @@
    ============================================================ */
 const STAGE_TEMPLATE = [
   {id:1, dia:'Día 1', nombre:'Autorización de alistamiento', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'30 min'},
-  {id:2, dia:'Día 2', nombre:'Llegada de moto al PDV', responsable:'Coordinador', area:'servicio', diasEsperados:1, tiempoLabel:'1 día'},
+  {id:2, dia:'Día 2', nombre:'Llegada de moto al PDV', responsable:'Coordinador de venta de motocicletas', area:'servicio', diasEsperados:1, tiempoLabel:'1 día'},
   {id:3, dia:'Día 2', nombre:'Desensamble de moto y piezas a enviar', responsable:'Alistador', area:'servicio', diasEsperados:1, tiempoLabel:'1 día'},
-  {id:4, dia:'Día 2-3', nombre:'Recogida de moto por el proveedor', responsable:'Coordinador', area:'servicio', formulario:true, diasEsperados:1, tiempoLabel:'1 día'},
-  {id:5, dia:'Día 2-3', nombre:'Proceso de pintura', responsable:'Proveedor / Pintor', area:'proveedor', pintura:true, tiempoLabel:'3 a 5 días según el trabajo'},
-  {id:6, dia:'Día 5+', nombre:'Llegada y revisión de calidad de piezas', responsable:'Encargado de calidad', area:'servicio', calidad:true, diasEsperados:0, tiempoLabel:'Revisión inmediata al llegar'},
+  {id:4, dia:'Día 2-3', nombre:'Recogida de moto por el proveedor', responsable:'Proveedor', area:'proveedor', formulario:true, diasEsperados:1, tiempoLabel:'1 día'},
+  {id:5, dia:'Día 2-3', nombre:'Moto en pintura', responsable:'Proveedor / Pintor', area:'proveedor', pintura:true, tiempoLabel:'3 a 5 días según el trabajo'},
+  {id:6, dia:'Día 5+', nombre:'Validación de calidad', responsable:'Encargado de calidad', area:'servicio', calidad:true, diasEsperados:0, tiempoLabel:'Revisión inmediata al llegar'},
   {id:7, dia:'Día 5+', nombre:'Ensamble final de la moto', responsable:'Alistador', area:'servicio', ensamble:true, diasEsperados:1, tiempoLabel:'1 día'},
   {id:8, dia:'Día 5+', nombre:'Agendamiento y entrega al cliente', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'1 hora'},
 ];
+
+// Flujo simplificado para trabajos de Calcomanías: solo intervienen Asesor, Coordinador y Proveedor.
+// La moto nunca se envía donde el proveedor — solo llegan las calcas.
+const CALCO_STAGE_TEMPLATE = [
+  {id:1, dia:'Día 1', nombre:'Autorización de alistamiento', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'30 min'},
+  {id:2, dia:'Día 1-2', nombre:'Llegada de moto al PDV', responsable:'Coordinador', area:'servicio', diasEsperados:1, tiempoLabel:'1 día'},
+  {id:3, dia:'Día 2+', nombre:'Llegada de calcas del proveedor', responsable:'Coordinador', area:'proveedor', calcas:true, diasEsperados:2, tiempoLabel:'Según el proveedor'},
+  {id:4, dia:'Día 2+', nombre:'Agendamiento y entrega al cliente', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'1 hora'},
+];
+
+function esCalcomanias(m){
+  const t = (m.pintura && m.pintura.tipo || '').toLowerCase();
+  return t.includes('calcoman');
+}
+
 
 const AREA_LABEL = {ventas:'Ventas de motos', servicio:'Centro de servicio', proveedor:'Proveedor'};
 
@@ -843,6 +891,7 @@ function saveModelColors(){ return guardarCatalogo('modelos_colores_v2', ()=>mod
 
 function uid(){ return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
+function nowTime(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function fmtMoney(n){ return '$' + Math.round(n||0).toLocaleString('es-CO'); }
 function daysBetween(a,b){ return Math.round((new Date(b) - new Date(a)) / 86400000); }
 
@@ -887,6 +936,7 @@ function stageOverdue(m){
 function paintInfo(m){
   const pintura = m.etapas.find(s=>s.id===5);
   const calidad = m.etapas.find(s=>s.id===6);
+  if(!pintura || !calidad) return null;
   if(!pintura.completado_inicio || calidad.completado) return null;
   const hasDate = !!pintura.fechaEsperada;
   const diff = hasDate ? daysBetween(todayISO(), pintura.fechaEsperada) : null; // positivo = faltan días, negativo = atraso
@@ -899,6 +949,24 @@ function paintInfo(m){
     atrasado: hasDate && diff < 0,
   };
 }
+function estimatedFinishDate(m){
+  if(computeStatus(m)==='completado') return null;
+  const idx = m.etapas.findIndex(s=>!s.completado);
+  if(idx===-1) return null;
+  let cursor = lastActivityDate(m);
+  let cierto = true; // false si estamos adivinando el tiempo de pintura
+  for(let i=idx;i<m.etapas.length;i++){
+    const s = m.etapas[i];
+    if(s.id===5){
+      if(s.fechaEsperada){ cursor = s.fechaEsperada; }
+      else { cursor = addDays(cursor, s.diasEstimados ? +s.diasEstimados : 4); cierto = false; }
+    } else {
+      cursor = addDays(cursor, s.diasEsperados!=null ? s.diasEsperados : (s.calcas?2:0));
+    }
+  }
+  const diff = daysBetween(todayISO(), cursor);
+  return { fecha: cursor, diasRestantes: diff, atrasado: diff < 0, cierto };
+}
 function computeStatus(m){
   const stages = m.etapas;
   const allDone = stages.every(s=>s.completado);
@@ -907,7 +975,7 @@ function computeStatus(m){
   // atraso 1: pintura en curso y hoy supera la fecha esperada, y aún no pasó calidad
   const pintura = stages.find(s=>s.id===5);
   const calidad = stages.find(s=>s.id===6);
-  if(pintura.completado_inicio && pintura.fechaEsperada && !calidad.completado){
+  if(pintura && calidad && pintura.completado_inicio && pintura.fechaEsperada && !calidad.completado){
     if(new Date(todayISO()) > new Date(pintura.fechaEsperada)) return 'atrasado';
   }
   // atraso 2: la etapa actual superó su tiempo esperado
@@ -915,6 +983,22 @@ function computeStatus(m){
   return 'en_proceso';
 }
 function completedCount(m){ return m.etapas.filter(s=>s.completado).length; }
+function compareUrgencia(a,b){
+  const sa = computeStatus(a), sb = computeStatus(b);
+  if(sa==='atrasado' && sb!=='atrasado') return -1;
+  if(sb==='atrasado' && sa!=='atrasado') return 1;
+  const ea = estimatedFinishDate(a), eb = estimatedFinishDate(b);
+  const da = ea ? new Date(ea.fecha).getTime() : Infinity;
+  const db = eb ? new Date(eb.fecha).getTime() : Infinity;
+  if(da!==db) return da-db;
+  return new Date(a.fecha) - new Date(b.fecha);
+}
+function matchesSearch(m, q){
+  if(!q) return true;
+  q = q.toLowerCase();
+  return [m.motocicleta, m.asesor, m.cedula, m.motor, m.colorPersonalizado, m.color]
+    .some(v => (v||'').toLowerCase().includes(q));
+}
 function progressPct(m){ return Math.round((completedCount(m)/m.etapas.length)*100); }
 
 /* ============================================================
@@ -928,6 +1012,8 @@ document.querySelectorAll('[data-goto]').forEach(b=>{
 });
 document.getElementById('btn-back-detalle').addEventListener('click', ()=>goto('seguimiento'));
 document.getElementById('btn-cancel-form').addEventListener('click', ()=>goto('dashboard'));
+document.getElementById('dash-search').addEventListener('input', renderDashboard);
+document.getElementById('seg-search').addEventListener('input', renderSeguimientoList);
 
 function goto(view){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
@@ -961,7 +1047,7 @@ function renderDashboard(){
   const facturasPendientes = motos.filter(m=>{
     const calidad = m.etapas.find(s=>s.id===6);
     const ensamble = m.etapas.find(s=>s.id===7);
-    return calidad.completado && !ensamble.completado;
+    return calidad && ensamble && calidad.completado && !ensamble.completado;
   }).length;
   const kpiFact = document.getElementById('kpi-facturas');
   if(kpiFact) kpiFact.textContent = facturasPendientes;
@@ -970,7 +1056,7 @@ function renderDashboard(){
   motos.filter(m=>computeStatus(m)!=='completado').forEach(m=>{
     const pintura = m.etapas.find(s=>s.id===5);
     const calidad = m.etapas.find(s=>s.id===6);
-    if(pintura.completado_inicio && pintura.fechaEsperada && !calidad.completado && new Date(todayISO())>new Date(pintura.fechaEsperada)){
+    if(pintura && calidad && pintura.completado_inicio && pintura.fechaEsperada && !calidad.completado && new Date(todayISO())>new Date(pintura.fechaEsperada)){
       const dias = daysBetween(pintura.fechaEsperada, todayISO());
       alertItems.push({m, html:`🔺 <b>${m.motocicleta||'Moto sin nombre'}</b> — pintura con ${dias} día(s) de atraso sobre lo estimado`});
     } else {
@@ -981,7 +1067,7 @@ function renderDashboard(){
       }
     }
     const ensamble = m.etapas.find(s=>s.id===7);
-    if(calidad.completado && !ensamble.completado){
+    if(calidad && ensamble && calidad.completado && !ensamble.completado){
       alertItems.push({m, html:`🧾 <b>${m.motocicleta||'Moto sin nombre'}</b> — falta el ensamble final y registrar la factura del proveedor`});
     }
   });
@@ -997,7 +1083,8 @@ function renderDashboard(){
 
   renderPaintWatchlist();
 
-  const activeMotos = motos.filter(m=>computeStatus(m)!=='completado');
+  const q = (document.getElementById('dash-search')||{}).value || '';
+  const activeMotos = motos.filter(m=>computeStatus(m)!=='completado' && matchesSearch(m,q)).sort(compareUrgencia);
   const completedMotos = motos.filter(m=>computeStatus(m)==='completado');
 
   const list = document.getElementById('dash-moto-list');
@@ -1006,9 +1093,9 @@ function renderDashboard(){
     return;
   }
   if(!activeMotos.length){
-    list.innerHTML = `<div class="empty">No hay motos activas en este momento. Todas las registradas ya fueron entregadas.</div>`;
+    list.innerHTML = `<div class="empty">${q ? 'Ninguna moto activa coincide con la búsqueda.' : 'No hay motos activas en este momento. Todas las registradas ya fueron entregadas.'}</div>`;
   } else {
-    list.innerHTML = activeMotos.slice().reverse().map(m=>motoRowHTML(m)).join('');
+    list.innerHTML = activeMotos.map(m=>motoRowHTML(m)).join('');
     list.querySelectorAll('.moto-row').forEach(r=>r.addEventListener('click', ()=>openDetail(r.dataset.id)));
   }
   renderCompletedToggle('dash-completed-block', completedMotos);
@@ -1062,19 +1149,30 @@ function renderInformesView(){
     return;
   }
 
-  const porModelo = {}, porColor = {};
+  // ---- 1. Cantidad de personalizaciones por referencia (modelo) ----
+  const porModelo = {};
   cohort.forEach(m=>{
     porModelo[m.motocicleta||'Sin especificar'] = (porModelo[m.motocicleta||'Sin especificar']||0)+1;
-    const c = m.colorPersonalizado || 'Sin especificar';
-    porColor[c] = (porColor[c]||0)+1;
   });
+  const maxModelo = Math.max(1, ...Object.values(porModelo), 0);
 
-  let enTiempo = 0, conAtraso = 0;
+  // ---- 2. Cantidad por asesor + tiempo promedio del proceso ----
+  const porAsesor = {}; // { asesor: {cantidad, sumaDias, completadas} }
   cohort.forEach(m=>{
-    const d = delayBreakdown(m);
-    if(d.onTime) enTiempo++; else conAtraso++;
+    const a = m.asesor || 'Sin especificar';
+    if(!porAsesor[a]) porAsesor[a] = {cantidad:0, sumaDias:0, completadas:0};
+    porAsesor[a].cantidad++;
+    if(m.fechaCompletado){
+      porAsesor[a].completadas++;
+      porAsesor[a].sumaDias += daysBetween(m.fecha, m.fechaCompletado);
+    }
   });
+  const maxAsesor = Math.max(1, ...Object.values(porAsesor).map(v=>v.cantidad), 0);
+  let sumaDiasGlobal = 0, completadasGlobal = 0;
+  Object.values(porAsesor).forEach(v=>{ sumaDiasGlobal += v.sumaDias; completadasGlobal += v.completadas; });
+  const promedioGlobal = completadasGlobal ? (sumaDiasGlobal/completadasGlobal).toFixed(1) : null;
 
+  // ---- 3. Tiempos atrasados y por cuál área se generaron (etapas completadas en el mes) ----
   const atrasoPorArea = {ventas:0, servicio:0, proveedor:0};
   let diasAtrasoTotal = 0;
   const motosConAtrasoEnMes = new Set();
@@ -1088,31 +1186,38 @@ function renderInformesView(){
       }
     });
   });
+  const maxArea = Math.max(1, ...Object.values(atrasoPorArea), 0);
+  const areaColor = {ventas:'var(--green)', servicio:'var(--amber)', proveedor:'var(--blue)'};
 
+  // ---- 4. Cantidad de reprocesos ----
   let reprocesosMes = 0;
   motos.forEach(m=>{ if(m.reprocesosPorMes && m.reprocesosPorMes[mes]) reprocesosMes += m.reprocesosPorMes[mes]; });
 
-  const maxModelo = Math.max(1, ...Object.values(porModelo));
-  const maxColor = Math.max(1, ...Object.values(porColor));
-  const maxArea = Math.max(1, ...Object.values(atrasoPorArea));
-
-  const areaColor = {ventas:'var(--green)', servicio:'var(--amber)', proveedor:'var(--blue)'};
-
   box.innerHTML = `
-    <div class="cards" style="grid-template-columns:repeat(4,1fr);">
+    <div class="cards" style="grid-template-columns:repeat(3,1fr);">
       <div class="card acc-blue"><div class="k">Personalizaciones</div><div class="v">${cohort.length}</div><div class="d">registradas en el mes</div></div>
-      <div class="card acc-green"><div class="k">En tiempo</div><div class="v">${enTiempo}</div><div class="d">sin atrasos hasta ahora</div></div>
-      <div class="card acc-red"><div class="k">Con atraso</div><div class="v">${conAtraso}</div><div class="d">tuvieron algún atraso</div></div>
-      <div class="card acc-amber"><div class="k">Reprocesos</div><div class="v">${reprocesosMes}</div><div class="d">piezas rechazadas en el mes</div></div>
+      <div class="card acc-amber"><div class="k">Tiempo promedio</div><div class="v">${promedioGlobal!==null ? promedioGlobal+'d' : '—'}</div><div class="d">del proceso completo (motos entregadas)</div></div>
+      <div class="card acc-red"><div class="k">Reprocesos</div><div class="v">${reprocesosMes}</div><div class="d">piezas rechazadas en el mes</div></div>
     </div>
 
-    <div class="section-title">Personalizaciones por modelo</div>
+    <div class="section-title">1. Personalizaciones por referencia</div>
     ${Object.keys(porModelo).length ? `<div class="report-list">${Object.entries(porModelo).sort((a,b)=>b[1]-a[1]).map(([k,v])=>reportBarRow(k,v,maxModelo,'var(--blue)')).join('')}</div>` : `<div class="empty">Sin datos este mes.</div>`}
 
-    <div class="section-title">Personalizaciones por color</div>
-    ${Object.keys(porColor).length ? `<div class="report-list">${Object.entries(porColor).sort((a,b)=>b[1]-a[1]).map(([k,v])=>reportBarRow(k,v,maxColor,'var(--brand)')).join('')}</div>` : `<div class="empty">Sin datos este mes.</div>`}
+    <div class="section-title">2. Personalizaciones y tiempo promedio por asesor</div>
+    ${Object.keys(porAsesor).length ? `<table class="informe-table">
+      <tr><th>Asesor</th><th>Cantidad</th><th>Entregadas</th><th>Tiempo promedio</th></tr>
+      ${Object.entries(porAsesor).sort((a,b)=>b[1].cantidad-a[1].cantidad).map(([asesor,v])=>{
+        const prom = v.completadas ? (v.sumaDias/v.completadas).toFixed(1)+' día(s)' : '—';
+        return `<tr>
+          <td>${asesor}</td>
+          <td class="mono">${v.cantidad}</td>
+          <td class="mono">${v.completadas}</td>
+          <td class="mono">${prom}</td>
+        </tr>`;
+      }).join('')}
+    </table>` : `<div class="empty">Sin datos este mes.</div>`}
 
-    <div class="section-title">Días de atraso por área (etapas completadas en ${mes})</div>
+    <div class="section-title">3. Tiempos atrasados por área (etapas completadas en ${mes})</div>
     ${diasAtrasoTotal>0 ? `<div class="report-list">
         ${reportBarRow('Ventas de motos', atrasoPorArea.ventas, maxArea, areaColor.ventas)}
         ${reportBarRow('Centro de servicio', atrasoPorArea.servicio, maxArea, areaColor.servicio)}
@@ -1120,6 +1225,9 @@ function renderInformesView(){
       </div>
       <p style="font-size:12px;color:var(--ink-soft);margin-top:8px;">${motosConAtrasoEnMes.size} moto(s) tuvieron al menos una etapa atrasada completada este mes, sumando ${diasAtrasoTotal} día(s) de atraso en total.</p>`
       : `<div class="empty">No se registraron atrasos en etapas completadas durante ${mes}. Cumplimos los tiempos prometidos. ✅</div>`}
+
+    <div class="section-title">4. Reprocesos</div>
+    <p style="font-size:13px;color:var(--ink-soft);">${reprocesosMes ? `Se registraron <b>${reprocesosMes}</b> reproceso(s) en ${mes} (piezas devueltas al proveedor por calidad).` : `No hubo reprocesos en ${mes}. ✅`}</p>
   `;
 }
 
@@ -1128,12 +1236,18 @@ function renderProveedorView(){
   const porRecoger = motos.filter(m=>{
     if(computeStatus(m)==='completado') return false;
     const next = nextPendingStage(m);
-    return next && next.id===4; // recogida pendiente, ya lista para que el proveedor la recoja
+    return next && next.id===4 && !esCalcomanias(m); // recogida pendiente, ya lista para que el proveedor la recoja
   });
   const enPintura = motos.filter(m=>computeStatus(m)!=='completado' && paintInfo(m));
+  const calcasPendientes = motos.filter(m=>{
+    if(computeStatus(m)==='completado') return false;
+    if(!esCalcomanias(m)) return false;
+    const next = nextPendingStage(m);
+    return next && next.calcas;
+  });
 
-  if(!porRecoger.length && !enPintura.length){
-    box.innerHTML = `<div class="empty">No hay motos por recoger ni en proceso de pintura en este momento.</div>`;
+  if(!porRecoger.length && !enPintura.length && !calcasPendientes.length){
+    box.innerHTML = `<div class="empty">No hay motos por recoger, en pintura, ni calcas pendientes en este momento.</div>`;
     return;
   }
 
@@ -1144,6 +1258,7 @@ function renderProveedorView(){
         <span class="pc-name">${m.motocicleta||'Moto sin nombre'}</span>
         ${extra}
       </div>
+      <div class="pc-date">Asesor: <b>${m.asesor||'—'}</b></div>
       <div class="pc-date">Color de fábrica: ${m.color||'—'}</div>
       <div class="pc-date">Color a personalizar: <b>${m.colorPersonalizado||'—'}</b></div>
       <div class="pc-meta">Trabajo: ${m.pintura.tipo}</div>
@@ -1170,6 +1285,10 @@ function renderProveedorView(){
           `<span class="pw-pill ok">${info.diasRestantes}d</span>`;
         return cardHTML(m, pill);
       }).join('') + `</div>`;
+  }
+  if(calcasPendientes.length){
+    html += `<div class="section-title">Calcas pendientes de entregar (${calcasPendientes.length})</div><div class="paint-grid">` +
+      calcasPendientes.map(m=>cardHTML(m, `<span class="pw-pill wait">Esperando calcas</span>`)).join('') + `</div>`;
   }
   box.innerHTML = html;
   box.querySelectorAll('[data-open]').forEach(el=>el.addEventListener('click', ()=>openDetail(el.dataset.open)));
@@ -1243,20 +1362,24 @@ function motoRowHTML(m){
   const dias = diasTranscurridos(m);
   const chipArea = next ? 'area-' + (next.area||'servicio') : '';
   const stripeCls = status==='atrasado' ? '' : (next ? 'stripe-'+(next.area||'servicio') : '');
-  const pInfo = paintInfo(m);
-  let paintBadge = '';
-  if(pInfo){
-    if(!pInfo.hasDate) paintBadge = `<span class="paint-mini wait">🎨 Sin fecha de entrega del proveedor</span>`;
-    else if(pInfo.atrasado) paintBadge = `<span class="paint-mini late">⏰ Pintura atrasada ${Math.abs(pInfo.diasRestantes)} día(s) — esperada ${pInfo.fechaEsperada}</span>`;
-    else paintBadge = `<span class="paint-mini ok">🎨 Entrega proveedor: <b>${pInfo.fechaEsperada}</b> (${pInfo.diasRestantes===0?'hoy':'faltan '+pInfo.diasRestantes+' día(s)'})</span>`;
+  const est = estimatedFinishDate(m);
+  let estBadge = '';
+  if(est){
+    const cls = est.atrasado ? 'late' : 'ok';
+    estBadge = `<div class="est-badge ${cls}">
+      <span class="est-icon">${est.atrasado?'⏰':'📅'}</span>
+      <span class="est-label">Entrega estimada${est.cierto?'':' (aprox.)'}:</span>
+      <span class="est-date">${est.fecha}</span>
+      <span class="est-diff">${est.atrasado ? '· 🔺 '+Math.abs(est.diasRestantes)+' día(s) de atraso' : est.diasRestantes===0 ? '· vence hoy' : '· faltan '+est.diasRestantes+' día(s)'}</span>
+    </div>`;
   }
   return `<div class="moto-row ${status==='atrasado'?'row-alert':stripeCls}" data-id="${m.id}">
     <div class="moto-id">
       <span class="name">${m.motocicleta || 'Moto sin nombre'} · ${m.color||''}</span>
-      <span class="meta">Asesor: ${m.asesor||'—'} &nbsp;·&nbsp; Cliente: <span class="mono">${m.cedula||'—'}</span> &nbsp;·&nbsp; Motor: <span class="mono">${m.motor||'—'}</span></span>
+      <span class="meta">Asesor: ${m.asesor||'—'} &nbsp;·&nbsp; Cliente: <span class="mono">${m.cedula||'—'}</span> &nbsp;·&nbsp; Motor: <span class="mono">${m.motor||'—'}</span> &nbsp;·&nbsp; Color a personalizar: <b>${m.colorPersonalizado||'—'}</b></span>
       ${stageRailHTML(m)}
       ${next ? `<span class="wait-chip ${chipArea} ${status==='atrasado'?'late':''}">${status==='atrasado'?'🔺':'<span class=\"cdot\"></span>'} Esperando: <b>${next.responsable}</b> — ${next.nombre}</span>` : ''}
-      ${paintBadge}
+      ${estBadge}
     </div>
     <div class="progress-wrap">
       <span class="progress-txt">${completedCount(m)}/${m.etapas.length} etapas</span>
@@ -1273,6 +1396,7 @@ function motoRowHTML(m){
 function renderForm(){
   document.getElementById('f-fecha').value = todayISO();
   document.getElementById('f-motor').value = '';
+  document.getElementById('f-num-piezas').value = '';
   document.getElementById('f-color-personalizado').value = '';
   document.getElementById('f-cedula').value = '';
   document.getElementById('f-valor-proveedor').value = '';
@@ -1452,10 +1576,12 @@ document.getElementById('btn-save-moto').addEventListener('click', async ()=>{
     color: colorFabrica,
     colorPersonalizado,
     motor: document.getElementById('f-motor').value.trim(),
+    numeroPiezas: document.getElementById('f-num-piezas').value ? +document.getElementById('f-num-piezas').value : null,
     cedula: document.getElementById('f-cedula').value.trim(),
     pintura: { tipo: tipoTrabajo, valorProveedor: proveedor, utilidadPct: utilPct, valorUtilidad: utilidad, iva, total },
-    etapas: STAGE_TEMPLATE.map(s=>({...s, completado:false, fechaCompletado:null})),
+    etapas: (tipoTrabajo.toLowerCase().includes('calcoman') ? CALCO_STAGE_TEMPLATE : STAGE_TEMPLATE).map(s=>({...s, completado:false, fechaCompletado:null})),
     reprocesosPorMes: {},
+    diasSumadosPorReproceso: 0,
     fechaCompletado: null,
   };
   motos.push(m);
@@ -1474,12 +1600,13 @@ function renderSeguimientoList(){
     document.getElementById('seg-completed-block').innerHTML = '';
     return;
   }
-  const activeMotos = motos.filter(m=>computeStatus(m)!=='completado');
+  const q = (document.getElementById('seg-search')||{}).value || '';
+  const activeMotos = motos.filter(m=>computeStatus(m)!=='completado' && matchesSearch(m,q)).sort(compareUrgencia);
   const completedMotos = motos.filter(m=>computeStatus(m)==='completado');
   if(!activeMotos.length){
-    list.innerHTML = `<div class="empty">No hay motos activas. Todas las registradas ya fueron entregadas.</div>`;
+    list.innerHTML = `<div class="empty">${q ? 'Ninguna moto activa coincide con la búsqueda.' : 'No hay motos activas. Todas las registradas ya fueron entregadas.'}</div>`;
   } else {
-    list.innerHTML = activeMotos.slice().reverse().map(m=>motoRowHTML(m)).join('');
+    list.innerHTML = activeMotos.map(m=>motoRowHTML(m)).join('');
     list.querySelectorAll('.moto-row').forEach(r=>r.addEventListener('click', ()=>openDetail(r.dataset.id)));
   }
   renderCompletedToggle('seg-completed-block', completedMotos);
@@ -1512,6 +1639,7 @@ function renderDetail(){
           <span>Fecha registro: <b>${m.fecha||'—'}</b></span>
           <span>Días desde el registro: <b>${diasTranscurridos(m)}</b></span>
           <span>Color a personalizar: <b>${m.colorPersonalizado||'—'}</b></span>
+          ${m.numeroPiezas ? `<span>N° de piezas: <b>${m.numeroPiezas}</b></span>` : ''}
           <span>Pintura: <b>${m.pintura.tipo}</b> — Total: <b>${fmtMoney(m.pintura.total)}</b></span>
         </div>
       </div>
@@ -1525,6 +1653,14 @@ function renderDetail(){
     </div>`;
 
   const pInfo = paintInfo(m);
+  const est = estimatedFinishDate(m);
+  const estBadgeBig = est ? `
+    <div class="est-badge big ${est.atrasado?'late':''}">
+      <span class="est-icon">${est.atrasado?'⏰':'📅'}</span>
+      <span class="est-label">Entrega estimada${est.cierto?'':' (aproximada)'}:</span>
+      <span class="est-date">${est.fecha}</span>
+      <span class="est-diff">${est.atrasado ? '· 🔺 '+Math.abs(est.diasRestantes)+' día(s) de atraso' : est.diasRestantes===0 ? '· vence hoy' : '· faltan '+est.diasRestantes+' día(s)'}</span>
+    </div>` : '';
   const currentBanner = next ? `
     <div class="current-banner area-${next.area||'servicio'} ${status==='atrasado'?'alert':''}">
       <div class="cb-dot ${status==='atrasado'?'pulse-alert':'pulse'}"></div>
@@ -1534,12 +1670,14 @@ function renderDetail(){
       </div>
       <div class="cb-days">${stalledDays(m)>0 ? stalledDays(m)+' día(s) en esta etapa' : 'Etapa recién iniciada'}</div>
     </div>
+    ${estBadgeBig}
     ${pInfo ? `
     <div class="paint-watch ${pInfo.atrasado?'late':''}">
       <div class="pw-icon">${pInfo.atrasado?'⏰':'🎨'}</div>
       <div class="pw-body">
         <div class="pw-label">Entrega estimada del proveedor</div>
         <div class="pw-date">${pInfo.hasDate ? pInfo.fechaEsperada : 'Aún no se ha definido cuántos días tomará'}</div>
+        ${m.diasSumadosPorReproceso ? `<div style="font-size:11px;color:var(--red);margin-top:3px;">+${m.diasSumadosPorReproceso} día(s) sumados por reproceso(s)</div>` : ''}
       </div>
       <div class="pw-status">
         ${!pInfo.hasDate ? `<span class="pw-pill wait">Falta indicar días</span>` :
@@ -1577,6 +1715,25 @@ function renderDetail(){
 function stageHTML(m,s){
   let extra = '';
   const priorDone = priorStagesComplete(m, s.id);
+  const requiereFacturaAsesor = s.id===1 && esCalcomanias(m);
+
+  if(s.id===3 && !esCalcomanias(m) && m.numeroPiezas){
+    extra = `<div class="stage-extra"><div class="row">
+      <span style="color:var(--ink-soft);">📦 Piezas a desmontar: <b>${m.numeroPiezas}</b></span>
+    </div></div>`;
+  }
+
+  if(requiereFacturaAsesor){
+    extra = `<div class="stage-extra">
+      <div class="row" style="justify-content:space-between;">
+        <span style="color:var(--ink-soft);">🧾 Este trabajo es Calcomanías: el cobro lo hace el asesor directamente — registra el N° de factura de esa venta antes de completar esta etapa.</span>
+      </div>
+      <div class="row">
+        <label>N° de factura (venta de calcomanías): <span style="color:var(--red);">*</span></label>
+        <input type="text" data-factura-asesor value="${s.numeroFacturaAsesor||''}" placeholder="Ej: FAC-00123">
+      </div>
+    </div>`;
+  }
 
   if(s.pintura){
     const delay = s.fechaEsperada ? daysBetween(s.fechaEsperada, todayISO()) : 0;
@@ -1605,35 +1762,56 @@ function stageHTML(m,s){
         </div>
       </div>
       ${!priorDone ? `<span style="font-size:11.5px;color:var(--ink-soft);">Se habilita cuando termine la etapa de pintura.</span>` : ''}
-      ${ (m.qcHistory && m.qcHistory.length) ? `<div class="reproceso-log">Reprocesos registrados en esta moto: ${m.qcHistory.filter(h=>h==='reproceso').length}</div>` : '' }
+      ${ (m.qcHistory && m.qcHistory.length) ? `<div class="reproceso-log">Reprocesos registrados en esta moto: ${m.qcHistory.filter(h=>h==='reproceso').length}${m.diasSumadosPorReproceso?` (+${m.diasSumadosPorReproceso} día(s) sumados al estimado)`:''}</div>` : '' }
     </div>`;
   }
 
   if(s.formulario){
-    extra = `<div class="stage-extra"><div class="row" style="justify-content:space-between;">
-      <span style="color:var(--ink-soft);">Al marcar esta etapa se registra la fecha de recogida y arranca el conteo de días de pintura.</span>
-    </div></div>`;
+    extra = `<div class="stage-extra">
+      <div class="row" style="justify-content:space-between;">
+        <span style="color:var(--ink-soft);">Al marcar esta etapa se registra la fecha de recogida y arranca el conteo de días de pintura.</span>
+      </div>
+      ${m.numeroPiezas ? `<div class="row"><span style="color:var(--ink-soft);">📦 Piezas a enviar al proveedor: <b>${m.numeroPiezas}</b></span></div>` : ''}
+    </div>`;
+  }
+
+  if(s.calcas){
+    extra = `<div class="stage-extra">
+      <div class="row" style="justify-content:space-between;">
+        <span style="color:var(--ink-soft);">🏷 Las calcas las trae directamente JF Paint — la moto no se envía a ningún lado. Marca esta etapa cuando el proveedor entregue las calcas en el PDV.</span>
+      </div>
+    </div>`;
   }
 
   if(s.ensamble){
+    const calidadStage = m.etapas.find(e=>e.id===6);
+    const puedeReabrir = calidadStage && calidadStage.completado && calidadStage.qc==='ok' && !s.completado;
     extra = `<div class="stage-extra">
       <div class="row" style="justify-content:space-between;">
         <span style="color:var(--ink-soft);">🧾 Antes de dar por finalizado el ensamble, registra el N° de factura del proveedor — no se puede completar esta etapa sin ese dato.</span>
       </div>
+      ${m.numeroPiezas ? `<div class="row"><span style="color:var(--ink-soft);">📦 Piezas a ensamblar: <b>${m.numeroPiezas}</b></span></div>` : ''}
       <div class="row">
         <label>N° de factura del proveedor: <span style="color:var(--red);">*</span></label>
         <input type="text" data-factura-num value="${s.numeroFactura||''}" placeholder="Ej: FAC-00123" ${!priorDone?'disabled':''}>
       </div>
+      ${puedeReabrir ? `<div class="row" style="justify-content:space-between;border-top:1px dashed var(--line);padding-top:8px;margin-top:2px;">
+        <span style="color:var(--red);font-size:11.5px;">¿Encontraste un imperfecto en una pieza ya aprobada por calidad?</span>
+        <button class="btn ghost sm" id="btn-reabrir-calidad" style="color:var(--red);border-color:#f2cac6;">↩ Devolver al proveedor (reproceso)</button>
+      </div>
+      <div id="reabrir-zone"></div>` : ''}
     </div>`;
   }
 
   const areaCls = 'area-' + (s.area||'servicio');
   const facturaFalta = s.ensamble && !(s.numeroFactura && s.numeroFactura.trim());
-  const blocked = !s.completado && (!priorDone || facturaFalta);
+  const facturaAsesorFalta = requiereFacturaAsesor && !(s.numeroFacturaAsesor && s.numeroFacturaAsesor.trim());
+  const blocked = !s.completado && (!priorDone || facturaFalta || facturaAsesorFalta);
   let blockedReason = '';
   if(!s.completado){
     if(!priorDone) blockedReason = 'Completa primero la etapa anterior.';
     else if(facturaFalta) blockedReason = 'Ingresa el N° de factura antes de completar.';
+    else if(facturaAsesorFalta) blockedReason = 'Ingresa el N° de factura de la venta de calcomanías antes de completar.';
   }
 
   // La etapa de calidad se completa únicamente con los botones de revisión, no con un botón genérico.
@@ -1645,9 +1823,9 @@ function stageHTML(m,s){
       <div class="stage-top">
         <div>
           <div class="stage-name">${s.nombre}</div>
-          <div class="stage-meta"><span class="area-tag ${areaCls}">${AREA_LABEL[s.area]||''}</span> ${s.dia} · ${s.responsable} · ⏱ ${s.tiempoLabel||'—'}${s.fechaCompletado?` · Completado: ${s.fechaCompletado}`:''}</div>
+          <div class="stage-meta"><span class="area-tag ${areaCls}">${AREA_LABEL[s.area]||''}</span> ${s.dia} · ${s.responsable} · ⏱ ${s.tiempoLabel||'—'}${s.fechaCompletado?` · Completado: ${s.fechaCompletado}${s.horaCompletado?' '+s.horaCompletado:''}`:''}</div>
         </div>
-        ${showGenericToggle ? `<button class="toggle-btn ${s.completado?'done':''}" data-toggle="${s.id}" ${blocked?`data-blocked="1" title="${blockedReason}"`:''}>${s.completado?'Completado ✓':'Marcar completado'}</button>` : (s.completado ? `<span class="toggle-btn done">Completado ✓</span>` : `<span class="toggle-btn" style="opacity:.6;">Pendiente de revisión</span>`)}
+        ${showGenericToggle ? `<button class="toggle-btn ${s.completado?'done':''}" data-toggle="${s.id}" ${blocked?`data-blocked="1" title="${blockedReason}"`:''}>${s.completado?'Completado ✓':(s.pintura?'Marcar llegada de pintura':(s.id===4?'Marcar recogida':'Marcar completado'))}</button>` : (s.completado ? `<span class="toggle-btn done">Completado ✓</span>` : `<span class="toggle-btn" style="opacity:.6;">Pendiente de revisión</span>`)}
       </div>
       ${extra}
     </div>
@@ -1661,25 +1839,27 @@ function bindStageEvents(m){
       const stage = m.etapas.find(s=>s.id===sid);
 
       if(!stage.completado && btn.dataset.blocked){
-        showToast('Ingresa el N° de factura del proveedor antes de completar esta etapa.');
+        showToast('Completa lo requerido antes de continuar.');
         return;
       }
 
       stage.completado = !stage.completado;
       stage.fechaCompletado = stage.completado ? todayISO() : null;
+      stage.horaCompletado = stage.completado ? nowTime() : null;
 
-      if(sid===4 && stage.completado){
-        // recogida por proveedor -> arranca conteo pintura si ya hay días estimados
-        const pintura = m.etapas.find(s=>s.id===5);
-        pintura.fechaInicio = todayISO();
-        pintura.completado_inicio = true;
-        if(pintura.diasEstimados){
-          pintura.fechaEsperada = addDays(pintura.fechaInicio, +pintura.diasEstimados);
+      if(stage.id===4 && !esCalcomanias(m)){
+        if(stage.completado){
+          // recogida por proveedor -> arranca conteo pintura si ya hay días estimados
+          const pintura = m.etapas.find(s=>s.id===5);
+          pintura.fechaInicio = todayISO();
+          pintura.completado_inicio = true;
+          if(pintura.diasEstimados){
+            pintura.fechaEsperada = addDays(pintura.fechaInicio, +pintura.diasEstimados);
+          }
+        } else {
+          const pintura = m.etapas.find(s=>s.id===5);
+          pintura.completado_inicio = false; pintura.fechaInicio=null; pintura.fechaEsperada=null;
         }
-      }
-      if(sid===4 && !stage.completado){
-        const pintura = m.etapas.find(s=>s.id===5);
-        pintura.completado_inicio = false; pintura.fechaInicio=null; pintura.fechaEsperada=null;
       }
 
       if(m.etapas.every(s=>s.completado)){
@@ -1698,6 +1878,16 @@ function bindStageEvents(m){
     facturaInp.addEventListener('input', async ()=>{
       const stage = m.etapas.find(s=>s.id===7);
       stage.numeroFactura = facturaInp.value.trim();
+      await saveMotos();
+      renderDetail();
+    });
+  }
+
+  const facturaAsesorInp = document.querySelector('[data-factura-asesor]');
+  if(facturaAsesorInp){
+    facturaAsesorInp.addEventListener('input', async ()=>{
+      const stage = m.etapas.find(s=>s.id===1);
+      stage.numeroFacturaAsesor = facturaAsesorInp.value.trim();
       await saveMotos();
       renderDetail();
     });
@@ -1726,25 +1916,55 @@ function bindStageEvents(m){
       m.qcHistory.push(btn.dataset.qc);
 
       if(btn.dataset.qc === 'reproceso'){
-        const month = todayISO().slice(0,7);
-        if(!m.reprocesosPorMes) m.reprocesosPorMes = {};
-        m.reprocesosPorMes[month] = (m.reprocesosPorMes[month]||0) + 1;
-        // suma días de atraso: extiende fecha esperada de pintura 2 días por defecto de reproceso
-        const pintura = m.etapas.find(s=>s.id===5);
-        if(pintura.fechaEsperada){
-          pintura.fechaEsperada = addDays(pintura.fechaEsperada, 2);
-        }
-        stage.completado = false;
-        showToast('Reproceso registrado. Se sumaron días de atraso al estimado de pintura.');
+        registrarReproceso(m, stage);
+        showToast('Reproceso registrado. +2 día(s) sumados al estimado de pintura.');
       } else {
         stage.completado = true;
         stage.fechaCompletado = todayISO();
+        stage.horaCompletado = nowTime();
         showToast('Piezas aprobadas por calidad.');
       }
       await saveMotos();
       renderDetail();
     });
   });
+
+  // Reabrir calidad desde Ensamble: se detectó un defecto ya con la moto en ensamble
+  const btnReabrir = document.getElementById('btn-reabrir-calidad');
+  if(btnReabrir){
+    btnReabrir.addEventListener('click', ()=>{
+      const zone = document.getElementById('reabrir-zone');
+      zone.innerHTML = `<span style="font-size:11.5px;color:var(--red);margin-right:6px;">¿Confirmas devolver la pieza al proveedor? Esto reabre la revisión de calidad.</span>
+        <button class="btn sm" id="btn-reabrir-confirm" style="background:var(--red);border-color:var(--red);">Sí, devolver</button>
+        <button class="btn ghost sm" id="btn-reabrir-cancel">Cancelar</button>`;
+      document.getElementById('btn-reabrir-confirm').addEventListener('click', async ()=>{
+        const calidad = m.etapas.find(s=>s.id===6);
+        if(!m.qcHistory) m.qcHistory = [];
+        m.qcHistory.push('reproceso');
+        registrarReproceso(m, calidad, 'ensamble');
+        await saveMotos();
+        showToast('Pieza devuelta al proveedor. Calidad quedó reabierta.');
+        renderDetail();
+      });
+      document.getElementById('btn-reabrir-cancel').addEventListener('click', ()=>renderDetail());
+    });
+  }
+}
+
+function registrarReproceso(m, calidadStage, origen){
+  const month = todayISO().slice(0,7);
+  if(!m.reprocesosPorMes) m.reprocesosPorMes = {};
+  m.reprocesosPorMes[month] = (m.reprocesosPorMes[month]||0) + 1;
+  m.diasSumadosPorReproceso = (m.diasSumadosPorReproceso||0) + 2;
+  const pintura = m.etapas.find(s=>s.id===5);
+  if(pintura && pintura.fechaEsperada){
+    pintura.fechaEsperada = addDays(pintura.fechaEsperada, 2);
+  }
+  calidadStage.completado = false;
+  calidadStage.fechaCompletado = null;
+  calidadStage.horaCompletado = null;
+  calidadStage.qc = 'reproceso';
+  if(origen==='ensamble') calidadStage.reprocesoDesdeEnsamble = true;
 }
 
 function addDays(iso, n){
@@ -1773,7 +1993,7 @@ async function getOrderNumber(m){
 }
 
 function solicitudFieldsHTML(m, numero, fecha){
-  const reparacion = `Pintar ${m.pintura.tipo}${m.colorPersonalizado ? ' — color '+m.colorPersonalizado : ''}`;
+  const reparacion = `${esCalcomanias(m)?'Calcas':'Pintar'}: ${m.pintura.tipo}${m.colorPersonalizado ? ' — color '+m.colorPersonalizado : ''}`;
   return `
     <div class="sol-date">${fecha}</div>
     <div class="sol-rows">
@@ -1822,7 +2042,6 @@ async function printForm(m){
    INIT
    ============================================================ */
 (async function init(){
-  document.getElementById('view-dashboard').innerHTML = document.getElementById('view-dashboard').innerHTML; // no-op guard
   await loadData();
   renderDashboard();
   setInterval(refrescarVistaActual, 30000);
