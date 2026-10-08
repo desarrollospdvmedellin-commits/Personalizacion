@@ -641,16 +641,29 @@ let currentMotoId = null;
    ============================================================ */
 const GOOGLE_SHEETS_API = 'https://script.google.com/macros/s/AKfycbx6WZqPQ6B9CM3xZbwacrzu9gMQzIPSUCpgTsr7cyNE4IGCwf--3rPrKmxQxBciJsff/exec';
 
+function esperar(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// Lee una clave de Google Sheets. Reintenta 3 veces y, si sigue fallando, LANZA un error.
+// (Nunca devuelve "vacío" cuando en realidad hubo un fallo de conexión.)
 async function googleGet(key){
   const url = `${GOOGLE_SHEETS_API}?action=get&key=${encodeURIComponent(key)}`;
-  const response = await fetch(url, { method:'GET', cache:'no-store' });
-  if(!response.ok) throw new Error(`HTTP ${response.status}`);
-  const data = await response.json();
-  if(data && Object.prototype.hasOwnProperty.call(data,'value')) return data.value;
-  if(data && Object.prototype.hasOwnProperty.call(data,'data')) return data.data;
-  if(data && Object.prototype.hasOwnProperty.call(data,'result')) return data.result;
-  return null;
+  let ultimo;
+  for(let i=0;i<3;i++){
+    try{
+      const response = await fetch(url, { method:'GET', cache:'no-store' });
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if(data && data.success === false) throw new Error(data.error || 'Error de Google Sheets');
+      if(data && data.error) throw new Error(data.error);
+      if(data && Object.prototype.hasOwnProperty.call(data,'value')) return data.value;
+      if(data && Object.prototype.hasOwnProperty.call(data,'data')) return data.data;
+      if(data && Object.prototype.hasOwnProperty.call(data,'result')) return data.result;
+      return null;
+    }catch(e){ ultimo = e; await esperar(700*(i+1)); }
+  }
+  throw ultimo || new Error('No se pudo leer '+key);
 }
+function parsear(value){ return typeof value === 'string' ? JSON.parse(value) : value; }
 
 async function googleSet(key, value){
   const response = await fetch(GOOGLE_SHEETS_API, {
@@ -661,56 +674,172 @@ async function googleSet(key, value){
   if(!response.ok) throw new Error(`HTTP ${response.status}`);
   const text = await response.text();
   if(!text) return true;
-  try{
-    const data = JSON.parse(text);
-    if(data && data.success === false) throw new Error(data.error || 'Google Sheets rechazó el guardado.');
-  }catch(e){
-    if(e.message && e.message !== 'Unexpected end of JSON input' && !/^Unexpected token/.test(e.message)) throw e;
-  }
+  if(/<html|<!doctype/i.test(text)) throw new Error('Google Sheets devolvió una página de error.');
+  let data = null;
+  try{ data = JSON.parse(text); }catch(e){ return true; }
+  if(data && (data.success === false || data.ok === false || data.error)) throw new Error(data.error || 'Google Sheets rechazó el guardado.');
   return true;
 }
 
+/* ------------------------------------------------------------
+   MOTOS: guardado seguro con varias personas a la vez.
+   Cada guardado envía SOLO los cambios de este equipo (motos nuevas,
+   modificadas o eliminadas aquí) aplicados sobre la versión más reciente
+   que hay en Google Sheets. Así nadie borra lo que otro agregó, y si una
+   lectura falla nunca se guarda una lista vacía encima.
+   ------------------------------------------------------------ */
+let motosSync = {};            // id -> JSON de cada moto tal como está en Google Sheets
+let motosCargadas = false;
+let cadenaGuardado = Promise.resolve();
+let guardando = false;
+
+function fijarSync(lista){
+  motosSync = {};
+  lista.forEach(m=>{ if(m && m.id) motosSync[m.id] = JSON.stringify(m); });
+}
+function cambiosLocales(){
+  const cambiados = [];
+  const idsLocales = new Set();
+  motos.forEach(m=>{
+    idsLocales.add(m.id);
+    if(motosSync[m.id] !== JSON.stringify(m)) cambiados.push(m);
+  });
+  const eliminados = Object.keys(motosSync).filter(id=>!idsLocales.has(id));
+  return {cambiados, eliminados};
+}
+// Mezcla lo que hay en Sheets con los cambios pendientes de este equipo.
+function mezclar(remotas, {cambiados, eliminados}){
+  const porId = new Map();
+  remotas.forEach(m=>{ if(m && m.id) porId.set(m.id, m); });
+  eliminados.forEach(id=>porId.delete(id));
+  cambiados.forEach(m=>porId.set(m.id, m)); // se conserva el mismo objeto local
+  // mantener el orden local para las que ya estaban aquí
+  const orden = [];
+  const vistos = new Set();
+  motos.forEach(m=>{ if(porId.has(m.id)){ orden.push(porId.get(m.id)); vistos.add(m.id); } });
+  porId.forEach((m,id)=>{ if(!vistos.has(id)) orden.push(m); });
+  return orden;
+}
+async function leerMotosRemotas(){
+  const value = await googleGet('motos');
+  const lista = value ? parsear(value) : [];
+  if(!Array.isArray(lista)) throw new Error('Formato de motos inválido');
+  return lista;
+}
+
+async function guardarMotosAhora(){
+  const cambios = cambiosLocales();
+  if(!cambios.cambiados.length && !cambios.eliminados.length) return true;
+  guardando = true;
+  try{
+    const remotas = await leerMotosRemotas();
+    const mezcla = mezclar(remotas, cambios);
+    await googleSet('motos', JSON.stringify(mezcla));
+    fijarSync(mezcla);
+    motos = mezcla;
+    motosCargadas = true;
+    return true;
+  }catch(e){
+    console.error('No se pudo guardar motos:', e);
+    showToast('No se pudo guardar (sin conexión con Google Sheets). Tus cambios siguen en pantalla; se guardarán en el próximo intento.');
+    return false;
+  }finally{ guardando = false; }
+}
+// Los guardados se hacen en fila, uno tras otro, para que no se pisen entre sí.
+function saveMotos(){
+  cadenaGuardado = cadenaGuardado.then(guardarMotosAhora, guardarMotosAhora);
+  return cadenaGuardado;
+}
+
+// Trae lo último de Google Sheets (lo que agregaron otros) sin perder cambios pendientes de aquí.
+async function sincronizarMotos(){
+  if(guardando) return false;
+  try{
+    const remotas = await leerMotosRemotas();
+    if(guardando) return false;
+    const pendientes = cambiosLocales();
+    const tienePendientes = pendientes.cambiados.length || pendientes.eliminados.length;
+    const nuevas = mezclar(remotas, pendientes);
+    const antes = JSON.stringify(motos);
+    fijarSync(remotas);
+    motos = nuevas;
+    motosCargadas = true;
+    ocultarAvisoConexion();
+    if(tienePendientes) saveMotos(); // reintentar subir lo que quedó pendiente
+    return antes !== JSON.stringify(motos);
+  }catch(e){
+    console.warn('Sin conexión con Google Sheets:', e);
+    if(!motosCargadas) mostrarAvisoConexion();
+    return false;
+  }
+}
+
+function mostrarAvisoConexion(){
+  let el = document.getElementById('aviso-conexion');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'aviso-conexion';
+    el.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:9999;background:#fbeae8;color:#8a2a22;border:1px solid #c9463c;border-radius:8px;padding:10px 14px;font-size:13px;max-width:92vw;box-shadow:0 4px 16px rgba(0,0,0,.15);';
+    el.textContent = 'No se pudo conectar con Google Sheets. Los datos pueden estar incompletos; reintentando…';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'block';
+}
+function ocultarAvisoConexion(){
+  const el = document.getElementById('aviso-conexion');
+  if(el) el.style.display = 'none';
+}
+
+/* ------------------------------------------------------------
+   CATÁLOGOS (tipos de trabajo, asesores, modelos):
+   solo se guardan si se cargaron bien. Si la carga falló, NO se
+   sobrescribe la lista real con la lista por defecto.
+   ------------------------------------------------------------ */
+const catalogoCargado = {tipos_trabajo_v2:false, asesores:false, modelos_colores_v2:false};
+const cadenaCatalogo = {};
+async function cargarCatalogo(key, porDefecto){
+  try{
+    const value = await googleGet(key);
+    catalogoCargado[key] = true;
+    return value ? parsear(value) : porDefecto.slice();
+  }catch(e){
+    console.error('Error cargando '+key+':', e);
+    catalogoCargado[key] = false;
+    return porDefecto.slice();
+  }
+}
+function guardarCatalogo(key, obtenerValor, mensajeError){
+  cadenaCatalogo[key] = (cadenaCatalogo[key] || Promise.resolve()).then(async ()=>{
+    if(!catalogoCargado[key]){
+      showToast('No se guardó: la lista no se pudo cargar de Google Sheets. Recarga la página e intenta de nuevo.');
+      return false;
+    }
+    try{ await googleSet(key, JSON.stringify(obtenerValor())); return true; }
+    catch(e){ console.error(e); showToast(mensajeError); return false; }
+  });
+  return cadenaCatalogo[key];
+}
+
 async function loadData(){
-  try{
-    const value = await googleGet('motos');
-    motos = value ? (typeof value === 'string' ? JSON.parse(value) : value) : [];
-  }catch(e){ motos = []; console.error('Error cargando motos:', e); }
-
-  try{
-    const value = await googleGet('tipos_trabajo_v2');
-    tiposTrabajo = value ? (typeof value === 'string' ? JSON.parse(value) : value) : DEFAULT_TIPOS_TRABAJO.slice();
-  }catch(e){ tiposTrabajo = DEFAULT_TIPOS_TRABAJO.slice(); console.error('Error cargando tipos de trabajo:', e); }
-
-  try{
-    const value = await googleGet('asesores');
-    asesores = value ? (typeof value === 'string' ? JSON.parse(value) : value) : DEFAULT_ASESORES.slice();
-  }catch(e){ asesores = DEFAULT_ASESORES.slice(); console.error('Error cargando asesores:', e); }
-
-  try{
-    const value = await googleGet('modelos_colores_v2');
-    modelColors = value ? (typeof value === 'string' ? JSON.parse(value) : value) : DEFAULT_MODEL_COLORS.slice();
-  }catch(e){ modelColors = DEFAULT_MODEL_COLORS.slice(); console.error('Error cargando modelos:', e); }
+  const [rMotos, tipos, ases, modelos] = await Promise.all([
+    leerMotosRemotas().then(l=>({ok:true, l}), e=>({ok:false, e})),
+    cargarCatalogo('tipos_trabajo_v2', DEFAULT_TIPOS_TRABAJO),
+    cargarCatalogo('asesores', DEFAULT_ASESORES),
+    cargarCatalogo('modelos_colores_v2', DEFAULT_MODEL_COLORS),
+  ]);
+  if(rMotos.ok){
+    motos = rMotos.l; fijarSync(motos); motosCargadas = true;
+  }else{
+    console.error('Error cargando motos:', rMotos.e);
+    motos = []; motosSync = {}; motosCargadas = false;
+    mostrarAvisoConexion();
+  }
+  tiposTrabajo = tipos; asesores = ases; modelColors = modelos;
 }
 
-async function saveMotos(){
-  try{ await googleSet('motos', JSON.stringify(motos)); }
-  catch(e){ console.error(e); showToast('No se pudo guardar. Intenta de nuevo.'); }
-}
-
-async function saveTiposTrabajo(){
-  try{ await googleSet('tipos_trabajo_v2', JSON.stringify(tiposTrabajo)); }
-  catch(e){ console.error(e); showToast('No se pudo guardar el catálogo.'); }
-}
-
-async function saveAsesores(){
-  try{ await googleSet('asesores', JSON.stringify(asesores)); }
-  catch(e){ console.error(e); showToast('No se pudo guardar la lista de asesores.'); }
-}
-
-async function saveModelColors(){
-  try{ await googleSet('modelos_colores_v2', JSON.stringify(modelColors)); }
-  catch(e){ console.error(e); showToast('No se pudo guardar la lista de modelos.'); }
-}
+function saveTiposTrabajo(){ return guardarCatalogo('tipos_trabajo_v2', ()=>tiposTrabajo, 'No se pudo guardar el catálogo.'); }
+function saveAsesores(){ return guardarCatalogo('asesores', ()=>asesores, 'No se pudo guardar la lista de asesores.'); }
+function saveModelColors(){ return guardarCatalogo('modelos_colores_v2', ()=>modelColors, 'No se pudo guardar la lista de modelos.'); }
 
 function uid(){ return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -811,6 +940,7 @@ function goto(view){
   if(view==='seguimiento') renderSeguimientoList();
   if(view==='proveedor') renderProveedorView();
   if(view==='informes') renderInformesView();
+  if(view!=='registrar') refrescarVistaActual();
 }
 
 /* ============================================================
@@ -1695,7 +1825,30 @@ async function printForm(m){
   document.getElementById('view-dashboard').innerHTML = document.getElementById('view-dashboard').innerHTML; // no-op guard
   await loadData();
   renderDashboard();
+  setInterval(refrescarVistaActual, 30000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refrescarVistaActual(); });
 })();
+
+// Trae lo que registraron otros y vuelve a pintar la vista, sin interrumpir a quien está escribiendo.
+let refrescandoVista = false;
+async function refrescarVistaActual(){
+  if(document.hidden || refrescandoVista) return;
+  refrescandoVista = true;
+  try{
+    const cambio = await sincronizarMotos();
+    if(!cambio) return;
+    const activa = document.querySelector('.view.active');
+    if(!activa) return;
+    const foco = document.activeElement;
+    if(foco && activa.contains(foco) && /INPUT|SELECT|TEXTAREA/.test(foco.tagName)) return;
+    const vista = activa.id.replace('view-','');
+    if(vista==='dashboard') renderDashboard();
+    else if(vista==='seguimiento') renderSeguimientoList();
+    else if(vista==='proveedor') renderProveedorView();
+    else if(vista==='informes') renderInformesView();
+    else if(vista==='detalle') renderDetail();
+  }finally{ refrescandoVista = false; }
+}
 </script>
 </body>
 </html>
