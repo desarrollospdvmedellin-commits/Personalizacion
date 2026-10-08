@@ -634,10 +634,10 @@
    ============================================================ */
 const STAGE_TEMPLATE = [
   {id:1, dia:'Día 1', nombre:'Autorización de alistamiento', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'30 min'},
-  {id:2, dia:'Día 2', nombre:'Llegada de moto al PDV', responsable:'Coordinador de venta de motocicletas', area:'servicio', diasEsperados:1, tiempoLabel:'1 día'},
+  {id:2, dia:'Día 2', nombre:'Llegada de moto al PDV', responsable:'Coordinador de motocicletas', area:'ventas', diasEsperados:1, tiempoLabel:'1 día'},
   {id:3, dia:'Día 2', nombre:'Desensamble de moto y piezas a enviar', responsable:'Alistador', area:'servicio', diasEsperados:1, tiempoLabel:'1 día'},
   {id:4, dia:'Día 2-3', nombre:'Recogida de moto por el proveedor', responsable:'Proveedor', area:'proveedor', formulario:true, diasEsperados:1, tiempoLabel:'1 día'},
-  {id:5, dia:'Día 2-3', nombre:'Moto en pintura', responsable:'Proveedor / Pintor', area:'proveedor', pintura:true, tiempoLabel:'3 a 5 días según el trabajo'},
+  {id:5, dia:'Día 2-3', nombre:'Moto en pintura', responsable:'Proveedor / Pintor', area:'proveedor', pintura:true, tiempoLabel:'Según días estimados del proveedor'},
   {id:6, dia:'Día 5+', nombre:'Validación de calidad', responsable:'Encargado de calidad', area:'servicio', calidad:true, diasEsperados:0, tiempoLabel:'Revisión inmediata al llegar'},
   {id:7, dia:'Día 5+', nombre:'Ensamble final de la moto', responsable:'Alistador', area:'servicio', ensamble:true, diasEsperados:1, tiempoLabel:'1 día'},
   {id:8, dia:'Día 5+', nombre:'Agendamiento y entrega al cliente', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'1 hora'},
@@ -647,7 +647,7 @@ const STAGE_TEMPLATE = [
 // La moto nunca se envía donde el proveedor — solo llegan las calcas.
 const CALCO_STAGE_TEMPLATE = [
   {id:1, dia:'Día 1', nombre:'Autorización de alistamiento', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'30 min'},
-  {id:2, dia:'Día 1-2', nombre:'Llegada de moto al PDV', responsable:'Coordinador', area:'servicio', diasEsperados:1, tiempoLabel:'1 día'},
+  {id:2, dia:'Día 1-2', nombre:'Llegada de moto al PDV', responsable:'Coordinador de motocicletas', area:'ventas', diasEsperados:1, tiempoLabel:'1 día'},
   {id:3, dia:'Día 2+', nombre:'Llegada de calcas del proveedor', responsable:'Coordinador', area:'proveedor', calcas:true, diasEsperados:2, tiempoLabel:'Según el proveedor'},
   {id:4, dia:'Día 2+', nombre:'Agendamiento y entrega al cliente', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'1 hora'},
 ];
@@ -758,7 +758,14 @@ function cambiosLocales(){
 // Mezcla lo que hay en Sheets con los cambios pendientes de este equipo.
 function mezclar(remotas, {cambiados, eliminados}){
   const porId = new Map();
-  remotas.forEach(m=>{ if(m && m.id) porId.set(m.id, m); });
+  // Si una moto no cambió, se conserva el MISMO objeto que ya está en pantalla,
+  // para que los botones de la ficha abierta sigan apuntando a la moto correcta.
+  const locales = new Map(motos.map(m=>[m.id, m]));
+  remotas.forEach(m=>{
+    if(!m || !m.id) return;
+    const local = locales.get(m.id);
+    porId.set(m.id, (local && JSON.stringify(local)===JSON.stringify(m)) ? local : m);
+  });
   eliminados.forEach(id=>porId.delete(id));
   cambiados.forEach(m=>porId.set(m.id, m)); // se conserva el mismo objeto local
   // mantener el orden local para las que ya estaban aquí
@@ -772,7 +779,16 @@ async function leerMotosRemotas(){
   const value = await googleGet('motos');
   const lista = value ? parsear(value) : [];
   if(!Array.isArray(lista)) throw new Error('Formato de motos inválido');
+  lista.forEach(actualizarEtapasMoto);
   return lista;
+}
+// Ajusta motos registradas antes de los cambios de etapas.
+function actualizarEtapasMoto(m){
+  if(!m || !Array.isArray(m.etapas)) return;
+  const llegada = m.etapas.find(e=>e.id===2 && /Llegada de moto/i.test(e.nombre||''));
+  if(llegada){ llegada.area = 'ventas'; llegada.responsable = 'Coordinador de motocicletas'; }
+  const pint = m.etapas.find(e=>e.id===5 && e.pintura);
+  if(pint && pint.tiempoLabel==='3 a 5 días según el trabajo') pint.tiempoLabel = 'Según días estimados del proveedor';
 }
 
 async function guardarMotosAhora(){
@@ -1737,16 +1753,24 @@ function stageHTML(m,s){
 
   if(s.pintura){
     const delay = s.fechaEsperada ? daysBetween(s.fechaEsperada, todayISO()) : 0;
+    const sinDias = s.completado_inicio && !s.diasEstimados; // motos antiguas que se recogieron sin días
+    const faltan = s.fechaEsperada ? daysBetween(todayISO(), s.fechaEsperada) : null;
     extra = `<div class="stage-extra">
-      <div class="row">
-        <label>Días estimados por el pintor:</label>
-        <select data-pintura-dias ${!priorDone?'disabled':''}>
+      ${s.completado_inicio ? `<div class="row">
+        <span style="color:var(--ink-soft);">🎨 Recogida el <b>${s.fechaInicio||'—'}</b>${s.diasEstimados?` · ${s.diasEstimados} día(s) estimados por el proveedor`:''}</span>
+      </div>` : `<div class="row"><span style="color:var(--ink-soft);">Esta etapa inicia cuando se marca la recogida de la moto por el proveedor.</span></div>`}
+      ${sinDias ? `<div class="row">
+        <label>Días estimados del proveedor:</label>
+        <select data-pintura-dias>
           <option value="">—</option>
-          ${[3,4,5].map(d=>`<option value="${d}" ${s.diasEstimados==d?'selected':''}>${d} días</option>`).join('')}
+          ${[1,2,3,4,5,6,7,8,9,10].map(d=>`<option value="${d}">${d} día${d>1?'s':''}</option>`).join('')}
         </select>
-        ${s.fechaEsperada ? `<span class="mono" style="font-size:11.5px;color:var(--ink-soft);">Llegada esperada: <b>${s.fechaEsperada}</b></span>` : ''}
-        ${s.completado_inicio && !m.etapas.find(e=>e.id===6).completado && delay>0 ? `<span class="delay-pill">${delay} día(s) de atraso</span>` : ''}
-      </div>
+      </div>` : ''}
+      ${s.fechaEsperada ? `<div class="row">
+        <span class="mono" style="font-size:12px;">Llegada estimada de pintura: <b>${s.fechaEsperada}</b></span>
+        ${!s.completado ? (delay>0 ? `<span class="delay-pill">${delay} día(s) de atraso</span>` : `<span style="font-size:11.5px;color:var(--ink-soft);">${faltan===0?'vence hoy':'faltan '+faltan+' día(s)'}</span>`) : ''}
+      </div>` : ''}
+      ${s.completado_inicio && !s.completado ? `<div class="row"><span style="font-size:11.5px;color:var(--ink-soft);">La moto queda en pintura hasta que marques <b>Marcar llegada de pintura</b>.</span></div>` : ''}
     </div>`;
   }
 
@@ -1767,10 +1791,24 @@ function stageHTML(m,s){
   }
 
   if(s.formulario){
+    const pinturaEt = m.etapas.find(e=>e.id===5) || {};
+    const diasOpc = [1,2,3,4,5,6,7,8,9,10];
+    const fechaPrev = pinturaEt.diasEstimados ? addDays(s.completado && pinturaEt.fechaInicio ? pinturaEt.fechaInicio : todayISO(), +pinturaEt.diasEstimados + (s.completado ? (m.diasSumadosPorReproceso||0) : 0)) : null;
     extra = `<div class="stage-extra">
       <div class="row" style="justify-content:space-between;">
-        <span style="color:var(--ink-soft);">Al marcar esta etapa se registra la fecha de recogida y arranca el conteo de días de pintura.</span>
+        <span style="color:var(--ink-soft);">Escoge los días que el proveedor estima para la pintura y luego marca la recogida. Con eso se calcula la fecha estimada de llegada de las piezas.</span>
       </div>
+      <div class="row">
+        <label>Días estimados del proveedor: <span style="color:var(--red);">*</span></label>
+        <select data-pintura-dias ${(!priorDone || s.completado)?'disabled':''}>
+          <option value="">—</option>
+          ${diasOpc.map(d=>`<option value="${d}" ${pinturaEt.diasEstimados==d?'selected':''}>${d} día${d>1?'s':''}</option>`).join('')}
+        </select>
+        ${s.completado && pinturaEt.fechaEsperada
+          ? `<span class="mono" style="font-size:11.5px;color:var(--ink-soft);">Llegada estimada: <b>${pinturaEt.fechaEsperada}</b></span>`
+          : (fechaPrev ? `<span class="mono" style="font-size:11.5px;color:var(--ink-soft);">Si se recoge hoy, llegaría el <b>${fechaPrev}</b></span>` : '')}
+      </div>
+      ${s.completado ? `<div class="row"><span style="font-size:11px;color:var(--ink-soft);">Para cambiar los días, desmarca la recogida y vuelve a marcarla.</span></div>` : ''}
       ${m.numeroPiezas ? `<div class="row"><span style="color:var(--ink-soft);">📦 Piezas a enviar al proveedor: <b>${m.numeroPiezas}</b></span></div>` : ''}
     </div>`;
   }
@@ -1806,12 +1844,15 @@ function stageHTML(m,s){
   const areaCls = 'area-' + (s.area||'servicio');
   const facturaFalta = s.ensamble && !(s.numeroFactura && s.numeroFactura.trim());
   const facturaAsesorFalta = requiereFacturaAsesor && !(s.numeroFacturaAsesor && s.numeroFacturaAsesor.trim());
-  const blocked = !s.completado && (!priorDone || facturaFalta || facturaAsesorFalta);
+  const pinturaDeEsta = m.etapas.find(e=>e.id===5);
+  const diasFaltan = s.formulario && !esCalcomanias(m) && !(pinturaDeEsta && pinturaDeEsta.diasEstimados);
+  const blocked = !s.completado && (!priorDone || facturaFalta || facturaAsesorFalta || diasFaltan);
   let blockedReason = '';
   if(!s.completado){
     if(!priorDone) blockedReason = 'Completa primero la etapa anterior.';
     else if(facturaFalta) blockedReason = 'Ingresa el N° de factura antes de completar.';
     else if(facturaAsesorFalta) blockedReason = 'Ingresa el N° de factura de la venta de calcomanías antes de completar.';
+    else if(diasFaltan) blockedReason = 'Escoge los días estimados del proveedor antes de marcar la recogida.';
   }
 
   // La etapa de calidad se completa únicamente con los botones de revisión, no con un botón genérico.
@@ -1839,7 +1880,7 @@ function bindStageEvents(m){
       const stage = m.etapas.find(s=>s.id===sid);
 
       if(!stage.completado && btn.dataset.blocked){
-        showToast('Completa lo requerido antes de continuar.');
+        showToast(btn.title || 'Completa lo requerido antes de continuar.');
         return;
       }
 
@@ -1854,7 +1895,7 @@ function bindStageEvents(m){
           pintura.fechaInicio = todayISO();
           pintura.completado_inicio = true;
           if(pintura.diasEstimados){
-            pintura.fechaEsperada = addDays(pintura.fechaInicio, +pintura.diasEstimados);
+            pintura.fechaEsperada = addDays(pintura.fechaInicio, +pintura.diasEstimados + (m.diasSumadosPorReproceso||0));
           }
         } else {
           const pintura = m.etapas.find(s=>s.id===5);
@@ -1898,8 +1939,8 @@ function bindStageEvents(m){
     diasSel.addEventListener('change', async ()=>{
       const pintura = m.etapas.find(s=>s.id===5);
       pintura.diasEstimados = diasSel.value;
-      if(pintura.fechaInicio && pintura.diasEstimados){
-        pintura.fechaEsperada = addDays(pintura.fechaInicio, +pintura.diasEstimados);
+      if(pintura.completado_inicio && pintura.fechaInicio && pintura.diasEstimados){
+        pintura.fechaEsperada = addDays(pintura.fechaInicio, +pintura.diasEstimados + (m.diasSumadosPorReproceso||0));
       }
       await saveMotos();
       renderDetail();
