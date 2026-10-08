@@ -810,9 +810,52 @@ async function guardarMotosAhora(){
   }finally{ guardando = false; }
 }
 // Los guardados se hacen en fila, uno tras otro, para que no se pisen entre sí.
+// La pantalla se actualiza al instante; el guardado en Google Sheets ocurre por detrás.
+// Varios cambios seguidos (por ejemplo, al escribir una factura) se juntan en un solo guardado.
+let temporizadorGuardado = null;
+let guardadosPendientes = 0;
 function saveMotos(){
-  cadenaGuardado = cadenaGuardado.then(guardarMotosAhora, guardarMotosAhora);
-  return cadenaGuardado;
+  indicadorGuardado('guardando');
+  clearTimeout(temporizadorGuardado);
+  temporizadorGuardado = setTimeout(()=>{
+    temporizadorGuardado = null;
+    guardadosPendientes++;
+    cadenaGuardado = cadenaGuardado.then(guardarMotosAhora, guardarMotosAhora).then(ok=>{
+      guardadosPendientes--;
+      if(guardadosPendientes===0 && !temporizadorGuardado){
+        const quedan = cambiosLocales();
+        indicadorGuardado(ok && !quedan.cambiados.length && !quedan.eliminados.length ? 'ok' : 'error');
+      }
+      return ok;
+    });
+  }, 400);
+  return Promise.resolve(true);
+}
+function hayCambiosSinGuardar(){
+  if(temporizadorGuardado || guardadosPendientes) return true;
+  const c = cambiosLocales();
+  return c.cambiados.length>0 || c.eliminados.length>0;
+}
+window.addEventListener('beforeunload', (e)=>{
+  if(hayCambiosSinGuardar()){ e.preventDefault(); e.returnValue = ''; }
+});
+// Reintento automático si quedó algo sin guardar (por ejemplo, se cayó el internet un momento).
+setInterval(()=>{ if(!temporizadorGuardado && !guardadosPendientes){ const c = cambiosLocales(); if(c.cambiados.length || c.eliminados.length) saveMotos(); } }, 20000);
+
+let ocultarIndicador = null;
+function indicadorGuardado(estado){
+  let el = document.getElementById('indicador-guardado');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'indicador-guardado';
+    el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9998;padding:8px 14px;border-radius:999px;font-size:12.5px;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,.15);transition:opacity .3s;font-family:inherit;';
+    document.body.appendChild(el);
+  }
+  clearTimeout(ocultarIndicador);
+  el.style.opacity = '1';
+  if(estado==='guardando'){ el.textContent = '⏳ Guardando…'; el.style.background='#eaf0f7'; el.style.color='#3f6fa8'; }
+  else if(estado==='ok'){ el.textContent = '✓ Guardado'; el.style.background='#e7f5ee'; el.style.color='#2f9166'; ocultarIndicador = setTimeout(()=>{ el.style.opacity='0'; }, 1800); }
+  else { el.textContent = '⚠ Sin guardar — reintentando…'; el.style.background='#fbeae8'; el.style.color='#c9463c'; }
 }
 
 // Trae lo último de Google Sheets (lo que agregaron otros) sin perder cambios pendientes de aquí.
@@ -1879,7 +1922,9 @@ function bindStageEvents(m){
       const sid = +btn.dataset.toggle;
       const stage = m.etapas.find(s=>s.id===sid);
 
-      if(!stage.completado && btn.dataset.blocked){
+      const facturaYaEscrita = (sid===7 && stage.numeroFactura) || (sid===1 && stage.numeroFacturaAsesor);
+      const soloFaltabaFactura = facturaYaEscrita && priorStagesComplete(m, sid);
+      if(!stage.completado && btn.dataset.blocked && !soloFaltabaFactura){
         showToast(btn.title || 'Completa lo requerido antes de continuar.');
         return;
       }
@@ -1916,22 +1961,22 @@ function bindStageEvents(m){
 
   const facturaInp = document.querySelector('[data-factura-num]');
   if(facturaInp){
-    facturaInp.addEventListener('input', async ()=>{
+    facturaInp.addEventListener('input', ()=>{
       const stage = m.etapas.find(s=>s.id===7);
       stage.numeroFactura = facturaInp.value.trim();
-      await saveMotos();
-      renderDetail();
+      saveMotos();
     });
+    facturaInp.addEventListener('change', ()=>setTimeout(renderDetail, 250));
   }
 
   const facturaAsesorInp = document.querySelector('[data-factura-asesor]');
   if(facturaAsesorInp){
-    facturaAsesorInp.addEventListener('input', async ()=>{
+    facturaAsesorInp.addEventListener('input', ()=>{
       const stage = m.etapas.find(s=>s.id===1);
       stage.numeroFacturaAsesor = facturaAsesorInp.value.trim();
-      await saveMotos();
-      renderDetail();
+      saveMotos();
     });
+    facturaAsesorInp.addEventListener('change', ()=>setTimeout(renderDetail, 250));
   }
 
   const diasSel = document.querySelector('[data-pintura-dias]');
