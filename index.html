@@ -664,7 +664,9 @@ const LOGO_FULL_B64 = "iVBORw0KGgoAAAANSUhEUgAAA4QAAAC/CAYAAACmGxLIAACacElEQVR4n
 
 const DEFAULT_TIPOS_TRABAJO = ['Pintura de rines','Calcomanías','Pintura completa','Otros'];
 
-const DEFAULT_ASESORES = ['JFFRANCO','FIALVAREZ','SMGARCIA','KYQUINTERO','LCORTIZ','MOROZCO','WFMUNOZT','MLPALACIO'];
+const DEFAULT_ASESORES = ['JFFRANCO','FIALVAREZ','SMGARCIA','KYQUINTERO','LCORTIZ','MOROZCO','WFMUNOZT','MLPALACIO','YALVAREZ'];
+// Asesores nuevos que deben aparecer en la lista guardada en Google Sheets.
+const ASESORES_NUEVOS = ['YALVAREZ'];
 
 const DEFAULT_MODEL_COLORS = [
   {modelo:'XTZ150-A (XTZ150 ABS)', colores:['ARENA NEGRO','AZUL NEGRO','BLANCO NEGRO','NEGRO']},
@@ -942,6 +944,12 @@ async function loadData(){
     mostrarAvisoConexion();
   }
   tiposTrabajo = tipos; asesores = ases; modelColors = modelos;
+  // Agrega a la lista guardada los asesores nuevos que aún no estén (solo si la lista cargó bien).
+  if(catalogoCargado['asesores']){
+    const existentes = new Set(asesores.map(x=>String(x).trim().toUpperCase()));
+    const faltan = ASESORES_NUEVOS.filter(x=>!existentes.has(x));
+    if(faltan.length){ asesores = asesores.concat(faltan); saveAsesores(); }
+  }
 }
 
 function saveTiposTrabajo(){ return guardarCatalogo('tipos_trabajo_v2', ()=>tiposTrabajo, 'No se pudo guardar el catálogo.'); }
