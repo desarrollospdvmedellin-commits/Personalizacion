@@ -511,7 +511,6 @@
           </div>
 
           <div class="field"><label># Motor</label><input type="text" id="f-motor" placeholder="Número de motor"></div>
-          <div class="field"><label>N° de piezas a desmontar</label><input type="number" id="f-num-piezas" min="0" placeholder="Ej: 4"></div>
 
           <div class="field">
             <label>Color de fábrica</label>
@@ -1463,7 +1462,6 @@ function motoRowHTML(m){
 function renderForm(){
   document.getElementById('f-fecha').value = todayISO();
   document.getElementById('f-motor').value = '';
-  document.getElementById('f-num-piezas').value = '';
   document.getElementById('f-color-personalizado').value = '';
   document.getElementById('f-cedula').value = '';
   document.getElementById('f-valor-proveedor').value = '';
@@ -1643,7 +1641,6 @@ document.getElementById('btn-save-moto').addEventListener('click', async ()=>{
     color: colorFabrica,
     colorPersonalizado,
     motor: document.getElementById('f-motor').value.trim(),
-    numeroPiezas: document.getElementById('f-num-piezas').value ? +document.getElementById('f-num-piezas').value : null,
     cedula: document.getElementById('f-cedula').value.trim(),
     pintura: { tipo: tipoTrabajo, valorProveedor: proveedor, utilidadPct: utilPct, valorUtilidad: utilidad, iva, total },
     etapas: (tipoTrabajo.toLowerCase().includes('calcoman') ? CALCO_STAGE_TEMPLATE : STAGE_TEMPLATE).map(s=>({...s, completado:false, fechaCompletado:null})),
@@ -1706,8 +1703,9 @@ function renderDetail(){
           <span>Fecha registro: <b>${m.fecha||'—'}</b></span>
           <span>Días desde el registro: <b>${diasTranscurridos(m)}</b></span>
           <span>Color a personalizar: <b>${m.colorPersonalizado||'—'}</b></span>
-          ${m.numeroPiezas ? `<span>N° de piezas: <b>${m.numeroPiezas}</b></span>` : ''}
-          <span>Pintura: <b>${m.pintura.tipo}</b> — Total: <b>${fmtMoney(m.pintura.total)}</b></span>
+          <span>Trabajo: <b>${m.pintura.tipo}</b></span>
+          <span>Valor proveedor: <b>${fmtMoney(m.pintura.valorProveedor)}</b></span>
+          <span>Valor final cliente: <b>${fmtMoney(m.pintura.total)}</b></span>
         </div>
       </div>
       <div class="right">
@@ -1784,11 +1782,6 @@ function stageHTML(m,s){
   const priorDone = priorStagesComplete(m, s.id);
   const requiereFacturaAsesor = s.id===1 && esCalcomanias(m);
 
-  if(s.id===3 && !esCalcomanias(m) && m.numeroPiezas){
-    extra = `<div class="stage-extra"><div class="row">
-      <span style="color:var(--ink-soft);">📦 Piezas a desmontar: <b>${m.numeroPiezas}</b></span>
-    </div></div>`;
-  }
 
   if(requiereFacturaAsesor){
     extra = `<div class="stage-extra">
@@ -1860,7 +1853,6 @@ function stageHTML(m,s){
           : (fechaPrev ? `<span class="mono" style="font-size:11.5px;color:var(--ink-soft);">Si se recoge hoy, llegaría el <b>${fechaPrev}</b></span>` : '')}
       </div>
       ${s.completado ? `<div class="row"><span style="font-size:11px;color:var(--ink-soft);">Para cambiar los días, desmarca la recogida y vuelve a marcarla.</span></div>` : ''}
-      ${m.numeroPiezas ? `<div class="row"><span style="color:var(--ink-soft);">📦 Piezas a enviar al proveedor: <b>${m.numeroPiezas}</b></span></div>` : ''}
     </div>`;
   }
 
@@ -1879,7 +1871,6 @@ function stageHTML(m,s){
       <div class="row" style="justify-content:space-between;">
         <span style="color:var(--ink-soft);">🧾 Antes de dar por finalizado el ensamble, registra el N° de factura del proveedor — no se puede completar esta etapa sin ese dato.</span>
       </div>
-      ${m.numeroPiezas ? `<div class="row"><span style="color:var(--ink-soft);">📦 Piezas a ensamblar: <b>${m.numeroPiezas}</b></span></div>` : ''}
       <div class="row">
         <label>N° de factura del proveedor: <span style="color:var(--red);">*</span></label>
         <input type="text" data-factura-num value="${s.numeroFactura||''}" placeholder="Ej: FAC-00123" ${!priorDone?'disabled':''}>
@@ -2086,6 +2077,11 @@ async function getOrderNumber(m){
   return m.numeroOrden;
 }
 
+function facturaCalcas(m){
+  const e1 = (m.etapas||[]).find(e=>e.id===1);
+  return e1 && e1.numeroFacturaAsesor ? e1.numeroFacturaAsesor.trim() : '';
+}
+
 function solicitudFieldsHTML(m, numero, fecha){
   const reparacion = `${esCalcomanias(m)?'Calcas':'Pintar'}: ${m.pintura.tipo}${m.colorPersonalizado ? ' — color '+m.colorPersonalizado : ''}`;
   return `
@@ -2097,7 +2093,9 @@ function solicitudFieldsHTML(m, numero, fecha){
       <div class="sol-row"><b>Orden de reparación:</b> &nbsp;</div>
       <div class="sol-row"><b>Técnico:</b> Alistamiento</div>
       <div class="sol-row"><b>Reparación solicitada:</b> ${reparacion}</div>
-      <div class="sol-row"><b>Valor reparación:</b> ${fmtMoney(m.pintura.valorProveedor)}</div>
+      <div class="sol-row"><b>Valor proveedor:</b> ${fmtMoney(m.pintura.valorProveedor)}</div>
+      <div class="sol-row"><b>Valor final cliente:</b> ${fmtMoney(m.pintura.total)} <span style="font-size:11px;color:#555;">(incluye utilidad e IVA 19%)</span></div>
+      ${esCalcomanias(m) ? `<div class="sol-row"><b>N° de factura:</b> ${facturaCalcas(m) || '<span style="color:#c9463c;">Pendiente — se registra en la etapa 1</span>'}</div>` : ''}
     </div>
     <div class="sol-foot">Solicitud del cliente</div>
     <div class="sol-client">${reparacion.toUpperCase()}</div>`;
@@ -2120,7 +2118,9 @@ async function printForm(m){
       ${solicitudFieldsHTML(m, numero, fecha)}
     </div>
     <div class="sol-note">
-      🧾 Este documento es soporte contable. Al recibir las piezas de este proveedor, registra el N° de factura en la etapa "Ensamble final de la moto" — esa etapa no se puede completar sin ese número.
+      ${esCalcomanias(m)
+        ? '🧾 Este documento es soporte contable. El N° de factura de la venta de calcomanías se registra en la etapa "Autorización de alistamiento".'
+        : '🧾 Este documento es soporte contable. Al recibir las piezas de este proveedor, registra el N° de factura en la etapa "Ensamble final de la moto" — esa etapa no se puede completar sin ese número.'}
     </div>
     <div class="sol-sign">
       <div>Firma responsable PDV</div>
