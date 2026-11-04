@@ -790,6 +790,9 @@ function actualizarEtapasMoto(m){
   if(llegada){ llegada.area = 'ventas'; llegada.responsable = 'Coordinador de motocicletas'; }
   const pint = m.etapas.find(e=>e.id===5 && e.pintura);
   if(pint && pint.tiempoLabel==='3 a 5 días según el trabajo') pint.tiempoLabel = 'Según días estimados del proveedor';
+  if(pint && pint.completado_inicio && pint.fechaInicio && pint.diasEstimados){
+    pint.fechaEsperada = addBusinessDays(pint.fechaInicio, +pint.diasEstimados + (m.diasSumadosPorReproceso||0));
+  }
 }
 
 async function guardarMotosAhora(){
@@ -956,7 +959,7 @@ function saveAsesores(){ return guardarCatalogo('asesores', ()=>asesores, 'No se
 function saveModelColors(){ return guardarCatalogo('modelos_colores_v2', ()=>modelColors, 'No se pudo guardar la lista de modelos.'); }
 
 function uid(){ return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-function todayISO(){ return new Date().toISOString().slice(0,10); }
+function todayISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function nowTime(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function fmtMoney(n){ return '$' + Math.round(n||0).toLocaleString('es-CO'); }
 function daysBetween(a,b){ return Math.round((new Date(b) - new Date(a)) / 86400000); }
@@ -1005,7 +1008,7 @@ function paintInfo(m){
   if(!pintura || !calidad) return null;
   if(!pintura.completado_inicio || calidad.completado) return null;
   const hasDate = !!pintura.fechaEsperada;
-  const diff = hasDate ? daysBetween(todayISO(), pintura.fechaEsperada) : null; // positivo = faltan días, negativo = atraso
+  const diff = hasDate ? businessDaysBetween(todayISO(), pintura.fechaEsperada) : null; // positivo = faltan días, negativo = atraso
   return {
     fechaEnvio: pintura.fechaInicio,
     diasEstimados: pintura.diasEstimados,
@@ -1025,7 +1028,7 @@ function estimatedFinishDate(m){
     const s = m.etapas[i];
     if(s.id===5){
       if(s.fechaEsperada){ cursor = s.fechaEsperada; }
-      else { cursor = addDays(cursor, s.diasEstimados ? +s.diasEstimados : 4); cierto = false; }
+      else { cursor = addBusinessDays(cursor, s.diasEstimados ? +s.diasEstimados : 4); cierto = false; }
     } else {
       cursor = addDays(cursor, s.diasEsperados!=null ? s.diasEsperados : (s.calcas?2:0));
     }
@@ -1123,7 +1126,7 @@ function renderDashboard(){
     const pintura = m.etapas.find(s=>s.id===5);
     const calidad = m.etapas.find(s=>s.id===6);
     if(pintura && calidad && pintura.completado_inicio && pintura.fechaEsperada && !calidad.completado && new Date(todayISO())>new Date(pintura.fechaEsperada)){
-      const dias = daysBetween(pintura.fechaEsperada, todayISO());
+      const dias = businessDaysBetween(pintura.fechaEsperada, todayISO());
       alertItems.push({m, html:`🔺 <b>${m.motocicleta||'Moto sin nombre'}</b> — pintura con ${dias} día(s) de atraso sobre lo estimado`});
     } else {
       const next = nextPendingStage(m);
@@ -1181,7 +1184,7 @@ function delayBreakdown(m){
       diasEsperados = s.diasEsperados!=null ? s.diasEsperados : null;
     }
     if(diasEsperados!=null){
-      const diasReal = daysBetween(inicio, s.fechaCompletado);
+      const diasReal = s.id===5 ? businessDaysBetween(inicio, s.fechaCompletado) : daysBetween(inicio, s.fechaCompletado);
       if(diasReal > diasEsperados){
         result.delays.push({stageId:s.id, nombre:s.nombre, area:s.area, dias: diasReal-diasEsperados, mesCompletado: s.fechaCompletado.slice(0,7)});
         result.onTime = false;
@@ -1796,9 +1799,9 @@ function stageHTML(m,s){
   }
 
   if(s.pintura){
-    const delay = s.fechaEsperada ? daysBetween(s.fechaEsperada, todayISO()) : 0;
+    const delay = s.fechaEsperada ? businessDaysBetween(s.fechaEsperada, todayISO()) : 0;
     const sinDias = s.completado_inicio && !s.diasEstimados; // motos antiguas que se recogieron sin días
-    const faltan = s.fechaEsperada ? daysBetween(todayISO(), s.fechaEsperada) : null;
+    const faltan = s.fechaEsperada ? businessDaysBetween(todayISO(), s.fechaEsperada) : null;
     extra = `<div class="stage-extra">
       ${s.completado_inicio ? `<div class="row">
         <span style="color:var(--ink-soft);">🎨 Recogida el <b>${s.fechaInicio||'—'}</b>${s.diasEstimados?` · ${s.diasEstimados} día(s) estimados por el proveedor`:''}</span>
@@ -1837,7 +1840,7 @@ function stageHTML(m,s){
   if(s.formulario){
     const pinturaEt = m.etapas.find(e=>e.id===5) || {};
     const diasOpc = [1,2,3,4,5,6,7,8,9,10];
-    const fechaPrev = pinturaEt.diasEstimados ? addDays(s.completado && pinturaEt.fechaInicio ? pinturaEt.fechaInicio : todayISO(), +pinturaEt.diasEstimados + (s.completado ? (m.diasSumadosPorReproceso||0) : 0)) : null;
+    const fechaPrev = pinturaEt.diasEstimados ? addBusinessDays(s.completado && pinturaEt.fechaInicio ? pinturaEt.fechaInicio : todayISO(), +pinturaEt.diasEstimados + (s.completado ? (m.diasSumadosPorReproceso||0) : 0)) : null;
     extra = `<div class="stage-extra">
       <div class="row" style="justify-content:space-between;">
         <span style="color:var(--ink-soft);">Escoge los días que el proveedor estima para la pintura y luego marca la recogida. Con eso se calcula la fecha estimada de llegada de las piezas.</span>
@@ -1939,7 +1942,7 @@ function bindStageEvents(m){
           pintura.fechaInicio = todayISO();
           pintura.completado_inicio = true;
           if(pintura.diasEstimados){
-            pintura.fechaEsperada = addDays(pintura.fechaInicio, +pintura.diasEstimados + (m.diasSumadosPorReproceso||0));
+            pintura.fechaEsperada = addBusinessDays(pintura.fechaInicio, +pintura.diasEstimados + (m.diasSumadosPorReproceso||0));
           }
         } else {
           const pintura = m.etapas.find(s=>s.id===5);
@@ -1984,7 +1987,7 @@ function bindStageEvents(m){
       const pintura = m.etapas.find(s=>s.id===5);
       pintura.diasEstimados = diasSel.value;
       if(pintura.completado_inicio && pintura.fechaInicio && pintura.diasEstimados){
-        pintura.fechaEsperada = addDays(pintura.fechaInicio, +pintura.diasEstimados + (m.diasSumadosPorReproceso||0));
+        pintura.fechaEsperada = addBusinessDays(pintura.fechaInicio, +pintura.diasEstimados + (m.diasSumadosPorReproceso||0));
       }
       await saveMotos();
       renderDetail();
@@ -2043,7 +2046,7 @@ function registrarReproceso(m, calidadStage, origen){
   m.diasSumadosPorReproceso = (m.diasSumadosPorReproceso||0) + 2;
   const pintura = m.etapas.find(s=>s.id===5);
   if(pintura && pintura.fechaEsperada){
-    pintura.fechaEsperada = addDays(pintura.fechaEsperada, 2);
+    pintura.fechaEsperada = addBusinessDays(pintura.fechaEsperada, 2);
   }
   calidadStage.completado = false;
   calidadStage.fechaCompletado = null;
@@ -2056,6 +2059,61 @@ function addDays(iso, n){
   const d = new Date(iso);
   d.setDate(d.getDate()+n);
   return d.toISOString().slice(0,10);
+}
+
+/* ============================================================
+   DÍAS HÁBILES (tiempo del proveedor de pintura)
+   Hábil = lunes a sábado. No cuentan domingos ni festivos de Colombia.
+   ============================================================ */
+const _festivosCache = {};
+function _isoUTC(d){ return d.toISOString().slice(0,10); }
+function _diaUTC(y, m, d){ return new Date(Date.UTC(y, m, d)); }
+function _sumarUTC(d, n){ const x = new Date(d); x.setUTCDate(x.getUTCDate()+n); return x; }
+function _alLunes(d){ const dow = d.getUTCDay(); return dow===1 ? d : _sumarUTC(d, (8-dow)%7); } // Ley Emiliani
+function _domingoPascua(y){ // algoritmo de Meeus/Jones/Butcher
+  const a=y%19, b=Math.floor(y/100), c=y%100, d=Math.floor(b/4), e=b%4, f=Math.floor((b+8)/25),
+        g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30, i=Math.floor(c/4), k=c%4,
+        l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+        mes=Math.floor((h+l-7*m+114)/31), dia=((h+l-7*m+114)%31)+1;
+  return _diaUTC(y, mes-1, dia);
+}
+function festivosColombia(y){
+  if(_festivosCache[y]) return _festivosCache[y];
+  const pascua = _domingoPascua(y);
+  const lista = [
+    // fijos
+    _diaUTC(y,0,1), _diaUTC(y,4,1), _diaUTC(y,6,20), _diaUTC(y,7,7), _diaUTC(y,11,8), _diaUTC(y,11,25),
+    // se trasladan al lunes siguiente
+    _alLunes(_diaUTC(y,0,6)), _alLunes(_diaUTC(y,2,19)), _alLunes(_diaUTC(y,5,29)), _alLunes(_diaUTC(y,7,15)),
+    _alLunes(_diaUTC(y,9,12)), _alLunes(_diaUTC(y,10,1)), _alLunes(_diaUTC(y,10,11)),
+    // según Semana Santa
+    _sumarUTC(pascua,-3), _sumarUTC(pascua,-2),          // Jueves y Viernes Santo
+    _sumarUTC(pascua,43), _sumarUTC(pascua,64), _sumarUTC(pascua,71) // Ascensión, Corpus Christi, Sagrado Corazón
+  ];
+  _festivosCache[y] = new Set(lista.map(_isoUTC));
+  return _festivosCache[y];
+}
+function esDiaHabil(iso){
+  const d = new Date(String(iso).slice(0,10)+'T00:00:00Z');
+  return d.getUTCDay()!==0 && !festivosColombia(d.getUTCFullYear()).has(_isoUTC(d));
+}
+// Suma n días hábiles a una fecha (YYYY-MM-DD).
+function addBusinessDays(iso, n){
+  let d = new Date(String(iso).slice(0,10)+'T00:00:00Z');
+  let faltan = Math.round(+n||0);
+  const paso = faltan<0 ? -1 : 1;
+  while(faltan!==0){ d = _sumarUTC(d, paso); if(esDiaHabil(_isoUTC(d))) faltan -= paso; }
+  return _isoUTC(d);
+}
+// Días hábiles de a hasta b (positivo si b es posterior, negativo si es anterior).
+function businessDaysBetween(a, b){
+  if(!a || !b) return 0;
+  let ini = new Date(String(a).slice(0,10)+'T00:00:00Z'), fin = new Date(String(b).slice(0,10)+'T00:00:00Z');
+  let signo = 1;
+  if(fin < ini){ [ini, fin] = [fin, ini]; signo = -1; }
+  let n = 0;
+  for(let d=_sumarUTC(ini,1); d<=fin; d=_sumarUTC(d,1)) if(esDiaHabil(_isoUTC(d))) n++;
+  return n*signo;
 }
 
 /* ============================================================
