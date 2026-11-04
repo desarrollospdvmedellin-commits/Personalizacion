@@ -987,10 +987,10 @@ function lastActivityDate(m){
   return done.length ? done[done.length-1] : m.fecha;
 }
 function diasTranscurridos(m){
-  return daysBetween(m.fecha, todayISO());
+  return businessDaysBetween(m.fecha, todayISO());
 }
-// Etapas del proveedor de pintura (recogida y pintura): se cuentan en días hábiles.
-function usaDiasHabiles(s){ return !!(s && ((s.id===5 && s.pintura) || s.formulario)); }
+// Todas las etapas se cuentan en días hábiles (lunes a sábado, sin domingos ni festivos de Colombia).
+function usaDiasHabiles(s){ return true; }
 function stalledDays(m){
   const next = nextPendingStage(m);
   if(!next) return 0;
@@ -1036,7 +1036,7 @@ function estimatedFinishDate(m){
       cursor = (usaDiasHabiles(s) ? addBusinessDays : addDays)(cursor, s.diasEsperados!=null ? s.diasEsperados : (s.calcas?2:0));
     }
   }
-  const diff = daysBetween(todayISO(), cursor);
+  const diff = businessDaysBetween(todayISO(), cursor);
   return { fecha: cursor, diasRestantes: diff, atrasado: diff < 0, cierto };
 }
 function computeStatus(m){
@@ -1236,7 +1236,7 @@ function renderInformesView(){
     porAsesor[a].cantidad++;
     if(m.fechaCompletado){
       porAsesor[a].completadas++;
-      porAsesor[a].sumaDias += daysBetween(m.fecha, m.fechaCompletado);
+      porAsesor[a].sumaDias += businessDaysBetween(m.fecha, m.fechaCompletado);
     }
   });
   const maxAsesor = Math.max(1, ...Object.values(porAsesor).map(v=>v.cantidad), 0);
