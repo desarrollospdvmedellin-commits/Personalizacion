@@ -738,17 +738,27 @@ async function googleSet(key, value){
    La versión evita leer una mezcla de dos guardados hechos al mismo tiempo.
    ------------------------------------------------------------ */
 const TAM_PARTE = 30000; // al guardarse, las comillas se escapan y el texto crece; 30.000 deja margen
+// El Apps Script a veces devuelve el texto tal cual y a veces ya convertido en objeto: se aceptan ambos.
 function _leerIndicePartes(value){
-  if(typeof value!=='string' || value.indexOf('"__partes"')===-1) return null;
-  try{ const o = JSON.parse(value); return (o && o.__partes && o.v) ? o : null; }catch(e){ return null; }
+  let o = value;
+  if(typeof value==='string'){
+    if(value.indexOf('"__partes"')===-1) return null;
+    try{ o = JSON.parse(value); }catch(e){ return null; }
+  }
+  return (o && typeof o==='object' && !Array.isArray(o) && o.__partes && o.v) ? o : null;
 }
+function _textoDeParte(p){ return (p && typeof p==='object' && typeof p.d==='string') ? p : null; }
 async function googleGetGrande(key){
   for(let intento=0; intento<3; intento++){
     const value = await googleGet(key);
     const indice = _leerIndicePartes(value);
     if(!indice) return value; // valor normal en una sola celda
     const partes = [];
-    for(let i=0;i<indice.__partes;i++) partes.push(parsear(await googleGet(key+'::parte'+i)));
+    for(let i=0;i<indice.__partes;i++){
+      const crudo = await googleGet(key+'::parte'+i);
+      let p = null; try{ p = _textoDeParte(parsear(crudo)); }catch(e){}
+      partes.push(p);
+    }
     if(partes.every(p=>p && p.v===indice.v)) return partes.map(p=>p.d).join('');
     await esperar(800); // alguien estaba guardando al mismo tiempo: volver a leer
   }
