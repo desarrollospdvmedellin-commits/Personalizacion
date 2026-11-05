@@ -731,6 +731,39 @@ async function googleSet(key, value){
 }
 
 /* ------------------------------------------------------------
+   VALORES GRANDES: una celda de Google Sheets admite máximo 50.000 caracteres.
+   Si el texto es más largo se parte en varias celdas:
+     clave            → {"__partes": n, "v": "<versión>"}
+     clave::parte0..n → {"v": "<versión>", "d": "<trozo>"}
+   La versión evita leer una mezcla de dos guardados hechos al mismo tiempo.
+   ------------------------------------------------------------ */
+const TAM_PARTE = 30000; // al guardarse, las comillas se escapan y el texto crece; 30.000 deja margen
+function _leerIndicePartes(value){
+  if(typeof value!=='string' || value.indexOf('"__partes"')===-1) return null;
+  try{ const o = JSON.parse(value); return (o && o.__partes && o.v) ? o : null; }catch(e){ return null; }
+}
+async function googleGetGrande(key){
+  for(let intento=0; intento<3; intento++){
+    const value = await googleGet(key);
+    const indice = _leerIndicePartes(value);
+    if(!indice) return value; // valor normal en una sola celda
+    const partes = [];
+    for(let i=0;i<indice.__partes;i++) partes.push(parsear(await googleGet(key+'::parte'+i)));
+    if(partes.every(p=>p && p.v===indice.v)) return partes.map(p=>p.d).join('');
+    await esperar(800); // alguien estaba guardando al mismo tiempo: volver a leer
+  }
+  throw new Error('No se pudo leer "'+key+'" completo de Google Sheets');
+}
+async function googleSetGrande(key, texto){
+  if(texto.length <= TAM_PARTE) return googleSet(key, texto);
+  const v = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  const n = Math.ceil(texto.length / TAM_PARTE);
+  // primero las partes y al final el índice, para que nadie lea un índice con partes a medio guardar
+  for(let i=0;i<n;i++) await googleSet(key+'::parte'+i, JSON.stringify({v, d: texto.slice(i*TAM_PARTE, (i+1)*TAM_PARTE)}));
+  return googleSet(key, JSON.stringify({__partes:n, v}));
+}
+
+/* ------------------------------------------------------------
    MOTOS: guardado seguro con varias personas a la vez.
    Cada guardado envía SOLO los cambios de este equipo (motos nuevas,
    modificadas o eliminadas aquí) aplicados sobre la versión más reciente
@@ -777,7 +810,7 @@ function mezclar(remotas, {cambiados, eliminados}){
   return orden;
 }
 async function leerMotosRemotas(){
-  const value = await googleGet('motos');
+  const value = await googleGetGrande('motos');
   const lista = value ? parsear(value) : [];
   if(!Array.isArray(lista)) throw new Error('Formato de motos inválido');
   lista.forEach(actualizarEtapasMoto);
@@ -802,7 +835,7 @@ async function guardarMotosAhora(){
   try{
     const remotas = await leerMotosRemotas();
     const mezcla = mezclar(remotas, cambios);
-    await googleSet('motos', JSON.stringify(mezcla));
+    await googleSetGrande('motos', JSON.stringify(mezcla));
     fijarSync(mezcla);
     motos = mezcla;
     motosCargadas = true;
