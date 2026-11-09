@@ -748,20 +748,37 @@ function _leerIndicePartes(value){
   return (o && typeof o==='object' && !Array.isArray(o) && o.__partes && o.v) ? o : null;
 }
 function _textoDeParte(p){ return (p && typeof p==='object' && typeof p.d==='string') ? p : null; }
+async function _leerParte(key, i){
+  const crudo = await googleGet(key+'::parte'+i);
+  try{ return _textoDeParte(parsear(crudo)); }catch(e){ return null; }
+}
+// Si dos equipos guardan casi al mismo tiempo, el índice puede quedar con la versión de un
+// guardado y las partes con la del otro. En ese caso se usan las partes si todas son de
+// la MISMA versión entre sí y juntas forman un JSON válido (el próximo guardado repara el índice).
+async function _leerPartesCoherentes(key){
+  const partes = [];
+  for(let i=0;i<50;i++){
+    const p = await _leerParte(key, i);
+    if(!p) break;
+    if(partes.length && p.v!==partes[0].v) break; // parte sobrante de un guardado anterior
+    partes.push(p);
+  }
+  if(!partes.length) return null;
+  const texto = partes.map(p=>p.d).join('');
+  try{ JSON.parse(texto); return texto; }catch(e){ return null; }
+}
 async function googleGetGrande(key){
   for(let intento=0; intento<3; intento++){
     const value = await googleGet(key);
     const indice = _leerIndicePartes(value);
     if(!indice) return value; // valor normal en una sola celda
     const partes = [];
-    for(let i=0;i<indice.__partes;i++){
-      const crudo = await googleGet(key+'::parte'+i);
-      let p = null; try{ p = _textoDeParte(parsear(crudo)); }catch(e){}
-      partes.push(p);
-    }
+    for(let i=0;i<indice.__partes;i++) partes.push(await _leerParte(key, i));
     if(partes.every(p=>p && p.v===indice.v)) return partes.map(p=>p.d).join('');
     await esperar(800); // alguien estaba guardando al mismo tiempo: volver a leer
   }
+  const reparado = await _leerPartesCoherentes(key);
+  if(reparado!==null){ console.warn('Índice de "'+key+'" desactualizado; se usaron las partes más recientes.'); return reparado; }
   throw new Error('No se pudo leer "'+key+'" completo de Google Sheets');
 }
 async function googleSetGrande(key, texto){
