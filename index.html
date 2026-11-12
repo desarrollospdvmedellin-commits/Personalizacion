@@ -732,10 +732,13 @@ async function googleSet(key, value){
 
 /* ------------------------------------------------------------
    VALORES GRANDES: una celda de Google Sheets admite máximo 50.000 caracteres.
-   Si el texto es más largo se parte en varias celdas:
-     clave            → {"__partes": n, "v": "<versión>"}
-     clave::parte0..n → {"v": "<versión>", "d": "<trozo>"}
-   La versión evita leer una mezcla de dos guardados hechos al mismo tiempo.
+   Si el texto es más largo se parte en varias celdas, en una de DOS ranuras (A y B):
+     clave                 → {"__partes": n, "v": "<versión>", "s": "A"|"B"}
+     clave::A::parte0..n   → {"v": "<versión>", "d": "<trozo>"}
+   Cada guardado escribe sus partes en la ranura que NO está en uso y solo al final
+   cambia el índice. Así, si un guardado se corta a la mitad, la versión anterior
+   queda intacta y la app la sigue leyendo.
+   (Formato antiguo, sin "s": clave::parte0..n — se sigue pudiendo leer.)
    ------------------------------------------------------------ */
 const TAM_PARTE = 30000; // al guardarse, las comillas se escapan y el texto crece; 30.000 deja margen
 // El Apps Script a veces devuelve el texto tal cual y a veces ya convertido en objeto: se aceptan ambos.
@@ -748,17 +751,17 @@ function _leerIndicePartes(value){
   return (o && typeof o==='object' && !Array.isArray(o) && o.__partes && o.v) ? o : null;
 }
 function _textoDeParte(p){ return (p && typeof p==='object' && typeof p.d==='string') ? p : null; }
-async function _leerParte(key, i){
-  const crudo = await googleGet(key+'::parte'+i);
+function _clavePartes(key, ranura){ return ranura ? key+'::'+ranura+'::parte' : key+'::parte'; }
+async function _leerParte(key, ranura, i){
+  const crudo = await googleGet(_clavePartes(key, ranura)+i);
   try{ return _textoDeParte(parsear(crudo)); }catch(e){ return null; }
 }
-// Si dos equipos guardan casi al mismo tiempo, el índice puede quedar con la versión de un
-// guardado y las partes con la del otro. En ese caso se usan las partes si todas son de
-// la MISMA versión entre sí y juntas forman un JSON válido (el próximo guardado repara el índice).
-async function _leerPartesCoherentes(key){
+// Lee todas las partes seguidas de una ranura que sean de la MISMA versión.
+// Devuelve el texto solo si juntas forman un JSON válido (o null).
+async function _leerRanuraCoherente(key, ranura){
   const partes = [];
   for(let i=0;i<50;i++){
-    const p = await _leerParte(key, i);
+    const p = await _leerParte(key, ranura, i);
     if(!p) break;
     if(partes.length && p.v!==partes[0].v) break; // parte sobrante de un guardado anterior
     partes.push(p);
@@ -768,26 +771,34 @@ async function _leerPartesCoherentes(key){
   try{ JSON.parse(texto); return texto; }catch(e){ return null; }
 }
 async function googleGetGrande(key){
+  let indice = null;
   for(let intento=0; intento<3; intento++){
     const value = await googleGet(key);
-    const indice = _leerIndicePartes(value);
+    indice = _leerIndicePartes(value);
     if(!indice) return value; // valor normal en una sola celda
     const partes = [];
-    for(let i=0;i<indice.__partes;i++) partes.push(await _leerParte(key, i));
+    for(let i=0;i<indice.__partes;i++) partes.push(await _leerParte(key, indice.s, i));
     if(partes.every(p=>p && p.v===indice.v)) return partes.map(p=>p.d).join('');
     await esperar(800); // alguien estaba guardando al mismo tiempo: volver a leer
   }
-  const reparado = await _leerPartesCoherentes(key);
-  if(reparado!==null){ console.warn('Índice de "'+key+'" desactualizado; se usaron las partes más recientes.'); return reparado; }
+  // El índice no coincide con sus partes: usar la última versión completa que haya.
+  const otras = indice.s==='A' ? ['A','B',''] : indice.s==='B' ? ['B','A',''] : ['','A','B'];
+  for(const r of otras){
+    const texto = await _leerRanuraCoherente(key, r);
+    if(texto!==null){ console.warn('Índice de "'+key+'" desactualizado; se usó la ranura "'+(r||'antigua')+'".'); return texto; }
+  }
   throw new Error('No se pudo leer "'+key+'" completo de Google Sheets');
 }
 async function googleSetGrande(key, texto){
   if(texto.length <= TAM_PARTE) return googleSet(key, texto);
+  // escribir en la ranura que no usa el índice actual
+  const actual = _leerIndicePartes(await googleGet(key));
+  const ranura = (actual && actual.s==='A') ? 'B' : 'A';
   const v = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
   const n = Math.ceil(texto.length / TAM_PARTE);
-  // primero las partes y al final el índice, para que nadie lea un índice con partes a medio guardar
-  for(let i=0;i<n;i++) await googleSet(key+'::parte'+i, JSON.stringify({v, d: texto.slice(i*TAM_PARTE, (i+1)*TAM_PARTE)}));
-  return googleSet(key, JSON.stringify({__partes:n, v}));
+  for(let i=0;i<n;i++) await googleSet(_clavePartes(key, ranura)+i, JSON.stringify({v, d: texto.slice(i*TAM_PARTE, (i+1)*TAM_PARTE)}));
+  // solo cuando todas las partes quedaron guardadas se apunta el índice a la ranura nueva
+  return googleSet(key, JSON.stringify({__partes:n, v, s:ranura}));
 }
 
 /* ------------------------------------------------------------
