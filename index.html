@@ -632,8 +632,8 @@
    DATA MODEL & PERSISTENCE
    ============================================================ */
 const STAGE_TEMPLATE = [
-  {id:1, dia:'Día 1', nombre:'Autorización de alistamiento', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'30 min'},
-  {id:2, dia:'Día 2', nombre:'Llegada de moto al PDV', responsable:'Coordinador de motocicletas', area:'ventas', diasEsperados:1, tiempoLabel:'1 día'},
+  // La antigua etapa 1 "Autorización de alistamiento" se eliminó: el proceso inicia cuando el asesor registra la moto.
+  {id:2, dia:'Día 1', nombre:'Llegada de moto al PDV', responsable:'Coordinador de motocicletas', area:'ventas', diasEsperados:1, tiempoLabel:'1 día'},
   {id:3, dia:'Día 2', nombre:'Desensamble de moto y piezas a enviar', responsable:'Alistador', area:'servicio', diasEsperados:1, tiempoLabel:'1 día'},
   {id:4, dia:'Día 2-3', nombre:'Recogida de moto por el proveedor', responsable:'Proveedor', area:'proveedor', formulario:true, diasEsperados:1, tiempoLabel:'1 día'},
   {id:5, dia:'Día 2-3', nombre:'Moto en pintura', responsable:'Proveedor / Pintor', area:'proveedor', pintura:true, tiempoLabel:'Según días estimados del proveedor'},
@@ -645,11 +645,22 @@ const STAGE_TEMPLATE = [
 // Flujo simplificado para trabajos de Calcomanías: solo intervienen Asesor, Coordinador y Proveedor.
 // La moto nunca se envía donde el proveedor — solo llegan las calcas.
 const CALCO_STAGE_TEMPLATE = [
-  {id:1, dia:'Día 1', nombre:'Autorización de alistamiento', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'30 min'},
-  {id:2, dia:'Día 1-2', nombre:'Llegada de moto al PDV', responsable:'Coordinador de motocicletas', area:'ventas', diasEsperados:1, tiempoLabel:'1 día'},
+  {id:2, dia:'Día 1', nombre:'Llegada de moto al PDV', responsable:'Coordinador de motocicletas', area:'ventas', diasEsperados:1, tiempoLabel:'1 día'},
   {id:3, dia:'Día 2+', nombre:'Llegada de calcas del proveedor', responsable:'Coordinador', area:'proveedor', calcas:true, diasEsperados:2, tiempoLabel:'Según el proveedor'},
   {id:4, dia:'Día 2+', nombre:'Agendamiento y entrega al cliente', responsable:'Asesor', area:'ventas', diasEsperados:0, tiempoLabel:'1 hora'},
 ];
+
+// Etapa donde el asesor registra el N° de factura de la venta de calcomanías:
+// en motos antiguas era la etapa 1 (Autorización de alistamiento); ahora es la de entrega.
+function etapaFacturaAsesor(m){
+  const et = m.etapas||[];
+  return et.find(e=>e.id===1) || et.find(e=>/Agendamiento y entrega/i.test(e.nombre||'')) || null;
+}
+function esFacturaAsesor(m, s){
+  if(!esCalcomanias(m)) return false;
+  const e = etapaFacturaAsesor(m);
+  return !!e && e.id===s.id;
+}
 
 function esCalcomanias(m){
   const t = (m.pintura && m.pintura.tipo || '').toLowerCase();
@@ -857,6 +868,14 @@ async function leerMotosRemotas(){
 // Ajusta motos registradas antes de los cambios de etapas.
 function actualizarEtapasMoto(m){
   if(!m || !Array.isArray(m.etapas)) return;
+  // Se eliminó la etapa "Autorización de alistamiento": si aún estaba pendiente, se quita
+  // (las que ya se completaron se conservan como historial).
+  const aut = m.etapas.find(e=>e.id===1 && /Autorizaci/i.test(e.nombre||''));
+  if(aut && !aut.completado){
+    m.etapas = m.etapas.filter(e=>e!==aut);
+    const entrega = m.etapas.find(e=>/Agendamiento y entrega/i.test(e.nombre||''));
+    if(aut.numeroFacturaAsesor && entrega && !entrega.numeroFacturaAsesor) entrega.numeroFacturaAsesor = aut.numeroFacturaAsesor;
+  }
   const llegada = m.etapas.find(e=>e.id===2 && /Llegada de moto/i.test(e.nombre||''));
   if(llegada){ llegada.area = 'ventas'; llegada.responsable = 'Coordinador de motocicletas'; }
   const pint = m.etapas.find(e=>e.id===5 && e.pintura);
@@ -1857,13 +1876,13 @@ function renderDetail(){
 function stageHTML(m,s){
   let extra = '';
   const priorDone = priorStagesComplete(m, s.id);
-  const requiereFacturaAsesor = s.id===1 && esCalcomanias(m);
+  const requiereFacturaAsesor = esFacturaAsesor(m, s);
 
 
   if(requiereFacturaAsesor){
     extra = `<div class="stage-extra">
       <div class="row" style="justify-content:space-between;">
-        <span style="color:var(--ink-soft);">🧾 Este trabajo es Calcomanías: el cobro lo hace el asesor directamente — registra el N° de factura de esa venta antes de completar esta etapa.</span>
+        <span style="color:var(--ink-soft);">🧾 Este trabajo es Calcomanías: el cobro lo hace el asesor directamente — registra el N° de factura de esa venta antes de entregar la moto.</span>
       </div>
       <div class="row">
         <label>N° de factura (venta de calcomanías): <span style="color:var(--red);">*</span></label>
@@ -1998,7 +2017,7 @@ function bindStageEvents(m){
       const sid = +btn.dataset.toggle;
       const stage = m.etapas.find(s=>s.id===sid);
 
-      const facturaYaEscrita = (sid===7 && stage.numeroFactura) || (sid===1 && stage.numeroFacturaAsesor);
+      const facturaYaEscrita = (sid===7 && stage.numeroFactura) || (esFacturaAsesor(m, stage) && stage.numeroFacturaAsesor);
       const soloFaltabaFactura = facturaYaEscrita && priorStagesComplete(m, sid);
       if(!stage.completado && btn.dataset.blocked && !soloFaltabaFactura){
         showToast(btn.title || 'Completa lo requerido antes de continuar.');
@@ -2048,7 +2067,7 @@ function bindStageEvents(m){
   const facturaAsesorInp = document.querySelector('[data-factura-asesor]');
   if(facturaAsesorInp){
     facturaAsesorInp.addEventListener('input', ()=>{
-      const stage = m.etapas.find(s=>s.id===1);
+      const stage = etapaFacturaAsesor(m);
       stage.numeroFacturaAsesor = facturaAsesorInp.value.trim();
       saveMotos();
     });
@@ -2210,8 +2229,8 @@ async function getOrderNumber(m){
 }
 
 function facturaCalcas(m){
-  const e1 = (m.etapas||[]).find(e=>e.id===1);
-  return e1 && e1.numeroFacturaAsesor ? e1.numeroFacturaAsesor.trim() : '';
+  const e = (m.etapas||[]).find(x=>x.numeroFacturaAsesor);
+  return e ? e.numeroFacturaAsesor.trim() : '';
 }
 
 function solicitudFieldsHTML(m, numero, fecha){
@@ -2227,7 +2246,7 @@ function solicitudFieldsHTML(m, numero, fecha){
       <div class="sol-row"><b>Reparación solicitada:</b> ${reparacion}</div>
       <div class="sol-row"><b>Valor proveedor:</b> ${fmtMoney(m.pintura.valorProveedor)}</div>
       <div class="sol-row"><b>Valor final cliente:</b> ${fmtMoney(m.pintura.total)} <span style="font-size:11px;color:#555;">(incluye utilidad e IVA 19%)</span></div>
-      ${esCalcomanias(m) ? `<div class="sol-row"><b>N° de factura:</b> ${facturaCalcas(m) || '<span style="color:#c9463c;">Pendiente — se registra en la etapa 1</span>'}</div>` : ''}
+      ${esCalcomanias(m) ? `<div class="sol-row"><b>N° de factura:</b> ${facturaCalcas(m) || '<span style="color:#c9463c;">Pendiente — se registra en la etapa de entrega al cliente</span>'}</div>` : ''}
     </div>
     <div class="sol-foot">Solicitud del cliente</div>
     <div class="sol-client">${reparacion.toUpperCase()}</div>`;
@@ -2251,7 +2270,7 @@ async function printForm(m){
     </div>
     <div class="sol-note">
       ${esCalcomanias(m)
-        ? '🧾 Este documento es soporte contable. El N° de factura de la venta de calcomanías se registra en la etapa "Autorización de alistamiento".'
+        ? '🧾 Este documento es soporte contable. El N° de factura de la venta de calcomanías se registra en la etapa "Agendamiento y entrega al cliente".'
         : '🧾 Este documento es soporte contable. Al recibir las piezas de este proveedor, registra el N° de factura en la etapa "Ensamble final de la moto" — esa etapa no se puede completar sin ese número.'}
     </div>
     <div class="sol-sign">
